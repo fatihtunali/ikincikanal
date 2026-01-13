@@ -12,6 +12,27 @@ import { Type } from 'class-transformer';
 import { NewDeviceDto, NewDeviceKeysDto } from './register.dto';
 
 /**
+ * Assertion response from WebAuthn authentication
+ */
+export class AssertionResponseDto {
+  @IsString()
+  @IsNotEmpty()
+  clientDataJSON: string;
+
+  @IsString()
+  @IsNotEmpty()
+  authenticatorData: string;
+
+  @IsString()
+  @IsNotEmpty()
+  signature: string;
+
+  @IsString()
+  @IsOptional()
+  userHandle?: string;
+}
+
+/**
  * Passkey assertion from WebAuthn authentication
  */
 export class PasskeyAssertionDto {
@@ -30,24 +51,6 @@ export class PasskeyAssertionDto {
   @ValidateNested()
   @Type(() => AssertionResponseDto)
   response: AssertionResponseDto;
-}
-
-export class AssertionResponseDto {
-  @IsString()
-  @IsNotEmpty()
-  clientDataJSON: string;
-
-  @IsString()
-  @IsNotEmpty()
-  authenticatorData: string;
-
-  @IsString()
-  @IsNotEmpty()
-  signature: string;
-
-  @IsString()
-  @IsOptional()
-  userHandle?: string;
 }
 
 /**
