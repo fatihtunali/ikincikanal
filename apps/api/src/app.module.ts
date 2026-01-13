@@ -12,6 +12,11 @@ import { AuthModule } from './modules/auth/auth.module';
 import { DevicesModule } from './modules/devices/devices.module';
 import { KeysModule } from './modules/keys/keys.module';
 import { MessagesModule } from './modules/messages/messages.module';
+import { CallsModule } from './modules/calls/calls.module';
+import { UsersModule } from './modules/users/users.module';
+import { PushModule } from './modules/push/push.module';
+import { FederationModule } from './modules/federation/federation.module';
+import { PrivacyModule } from './modules/privacy/privacy.module';
 
 // Controllers & Services
 import { AppController } from './app.controller';
@@ -53,6 +58,11 @@ import { AppService } from './app.service';
     DevicesModule,
     KeysModule,
     MessagesModule,
+    CallsModule,
+    UsersModule,
+    PushModule,
+    FederationModule,
+    PrivacyModule,
   ],
   controllers: [AppController],
   providers: [

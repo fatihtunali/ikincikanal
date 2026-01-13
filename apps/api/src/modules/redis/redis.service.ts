@@ -321,4 +321,38 @@ export class RedisService implements OnModuleDestroy {
     const exists = await this.client.exists(`blacklist:jti:${jti}`);
     return exists === 1;
   }
+
+  // ==========================================================================
+  // Privacy / Export / Deletion
+  // ==========================================================================
+
+  /**
+   * Generic get for privacy operations
+   */
+  async get(key: string): Promise<string | null> {
+    return this.client.get(key);
+  }
+
+  /**
+   * Generic set with TTL for privacy operations
+   */
+  async setex(key: string, ttl: number, value: string): Promise<void> {
+    await this.client.setex(key, ttl, value);
+  }
+
+  /**
+   * Generic delete for privacy operations
+   */
+  async del(key: string): Promise<void> {
+    await this.client.del(key);
+  }
+
+  /**
+   * Delete multiple keys for privacy operations
+   */
+  async delMultiple(keys: string[]): Promise<void> {
+    if (keys.length > 0) {
+      await this.client.del(...keys);
+    }
+  }
 }
