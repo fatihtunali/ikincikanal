@@ -1,0 +1,2629 @@
+openapi: 3.0.3
+info:
+  title: IKINCI KANAL - Decentralized Secure Messenger API
+  version: 0.2.0
+  description: |
+    Decentralized, end-to-end encrypted messaging platform.
+
+    ## Core Principles
+    - **Zero Knowledge**: Server never sees plaintext content
+    - **Metadata Protection**: Sealed sender, minimal logging
+    - **User Control**: One-click data deletion
+    - **Decentralized**: Federated server architecture
+    - **Disappearing Messages**: Auto-delete support
+
+    ## Security Roadmap
+    | Version | Authentication | Notes |
+    |---------|---------------|-------|
+    | **V1 (MVP)** | Passkey (WebAuthn) + password fallback | Passkey preferred, password for legacy |
+    | **V2** | OPAQUE protocol | Password users: server NEVER sees password |
+    | **V3** | OPAQUE + Hardware key | YubiKey/Titan key binding |
+
+    **V1 Auth Strategy:**
+    - **Primary**: Passkey (WebAuthn) - biometric/device-bound, phishing-resistant
+    - **Fallback**: Password (Argon2id) - for devices without passkey support
+    - **Recommendation**: Prompt users to add passkey even if registered with password
+
+    **Why Passkey in V1?**
+    - Mobile: Face ID / Touch ID = zero friction + maximum security
+    - Desktop: Platform authenticator or security key
+    - No password = no password to steal, leak, or phish
+
+    **Why OPAQUE in V2?**
+    For password fallback users: OPAQUE ensures server NEVER sees the password,
+    only stores a "password file" useless without client computation.
+
+    ## Message Lifecycle & TTL Semantics
+    ```
+    ┌──────────────────────────────────────────────────────────┐
+    │                    MESSAGE LIFECYCLE                      │
+    ├──────────────────────────────────────────────────────────┤
+    │                                                          │
+    │  [SEND] ──► [SERVER QUEUE] ──► [DELIVER] ──► [READ]     │
+    │               │                    │           │         │
+    │               ▼                    ▼           ▼         │
+    │          expiresAt            delivered   disappearing   │
+    │       (server TTL)          (ack = delete)  (client TTL) │
+    │                                                          │
+    └──────────────────────────────────────────────────────────┘
+    ```
+
+    **Two distinct TTL concepts:**
+    1. **Server TTL (`expiresAt`)**: How long server holds undelivered message
+       - Purpose: Prevent infinite storage, delivery window
+       - Default: 7 days, then server auto-deletes
+       - Message is deleted from server after ACK regardless of TTL
+
+    2. **Disappearing Timer (`disappearingSeconds`)**: Client-side auto-delete
+       - Purpose: Privacy feature, cryptographic erasure
+       - Triggered: When recipient READS (decrypts) the message
+       - Client responsibility: Delete from local storage after timer
+       - Server has NO knowledge of read status or timer
+
+    ## Architecture
+    ```
+    ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+    │  Server A   │◄───►│  Server B   │◄───►│  Server C   │
+    │ @alice.a.io │     │ @bob.b.net  │     │ @carol.c.org│
+    └─────────────┘     └─────────────┘     └─────────────┘
+          ▲                   ▲                   ▲
+          │                   │                   │
+       Alice               Bob                Carol
+    ```
+
+    ## Federation Authentication (Ed25519 Signatures)
+    Federation uses **request signing**, NOT JWT tokens.
+
+    ```
+    POST /federation/inbox
+    X-Server-Origin: https://serverA.com
+    X-Server-Key-Id: key-2025-01
+    X-Timestamp: 2025-01-13T19:30:00Z
+    X-Nonce: a1b2c3d4e5f6g7h8
+    X-Signature: <Ed25519 signature of canonical request>
+    ```
+
+    **Why not JWT?**
+    - JWT requires clock sync, expiry management, token refresh
+    - Ed25519 signatures are stateless, no expiry headaches
+    - Simpler key rotation: just add new key ID
+    - More aligned with cryptographic architecture
+
+    **Signature format (with replay protection):**
+    ```
+    canonical = METHOD + "\n"
+              + PATH + "\n"
+              + TIMESTAMP + "\n"
+              + NONCE + "\n"
+              + SHA256(BODY)
+    signature = Ed25519.sign(canonical, server_private_key)
+    ```
+
+    **Replay Protection:**
+    - `X-Nonce`: Random 16+ char string, unique per request
+    - Server caches `(origin, nonce)` pairs for 5 minutes
+    - Duplicate nonce within window = reject with 409 Conflict
+    - Timestamp outside ±5 min = reject with 400 Bad Request
+
+    ## User Handle Format
+    - Local: `alice` (same server)
+    - Federated: `alice@serverA.com` (cross-server)
+
+    ## Legal & Audit Considerations
+    This system is designed for **legitimate privacy** - protecting journalists,
+    activists, whistleblowers, and everyday users from mass surveillance.
+
+    **Operator responsibilities:**
+    - Comply with local laws regarding lawful intercept (where applicable)
+    - Maintain abuse reporting mechanisms (CSAM, terrorism)
+    - Log only what is legally required (varies by jurisdiction)
+    - E2EE means operators CANNOT read message content even if compelled
+
+    **What CAN be logged (if legally required):**
+    - Account metadata (handle, creation date, IP at registration)
+    - Message metadata (from/to user IDs, timestamp) - NOT content
+    - Federation traffic (server-to-server, NOT payload content)
+
+    **What CANNOT be provided (technical limitation):**
+    - Message content (E2EE, server never has keys)
+    - Decryption keys (only on user devices)
+    - Historical messages (deleted after delivery + ACK)
+
+servers:
+  - url: https://api.ikincikanal.com/v1
+    description: Primary Federation Node
+  - url: http://localhost:3051/v1
+    description: Local Development
+
+tags:
+  - name: Health
+    description: Server health and federation status
+  - name: Auth
+    description: Registration, login, account management
+  - name: Users
+    description: User profiles and discovery
+  - name: Devices
+    description: Multi-device management
+  - name: Keys
+    description: Signal Protocol key management
+  - name: Messages
+    description: Encrypted messaging with sealed sender
+  - name: Calls
+    description: Encrypted VoIP signaling
+  - name: Push
+    description: Push notification tokens
+  - name: Federation
+    description: Server-to-server communication
+  - name: Privacy
+    description: Data deletion and privacy controls
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ============================================================
+  # HEALTH & FEDERATION STATUS
+  # ============================================================
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check with federation info
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /.well-known/ikincikanal-server:
+    get:
+      tags: [Federation]
+      summary: Server discovery endpoint (federation)
+      security: []
+      description: |
+        Returns server metadata for federation discovery.
+        Other servers use this to verify and connect.
+      responses:
+        "200":
+          description: Server info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerDiscovery"
+
+  # ============================================================
+  # AUTHENTICATION & ACCOUNT
+  # ============================================================
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register new account + first device
+      security: []
+      description: |
+        Creates a new user account with initial device and keys.
+        Handle format: alphanumeric, 3-32 chars.
+        For federated users, handle becomes `handle@this-server.com`
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with password (fallback)
+      security: []
+      description: |
+        Password-based login. For passkey login, use /auth/passkey/* endpoints.
+
+        **Rate Limiting (Brute-Force Protection):**
+        | Scope | Limit | Window | Action |
+        |-------|-------|--------|--------|
+        | Per IP | 5 attempts | 15 min | 429 + Retry-After |
+        | Per handle | 10 attempts | 1 hour | 429 + exponential backoff |
+        | Global suspicious | 100/min | 1 min | CAPTCHA required |
+
+        After 10 failed attempts per handle, account enters "cool-down" mode:
+        - 1st lockout: 15 min
+        - 2nd lockout: 1 hour
+        - 3rd lockout: 24 hours + email/passkey verification required
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordLoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /auth/passkey/options:
+    post:
+      tags: [Auth]
+      summary: Get WebAuthn challenge for passkey login
+      security: []
+      description: |
+        Step 1 of passkey login. Returns challenge for navigator.credentials.get().
+
+        **Flow:**
+        1. Client calls this endpoint with handle
+        2. Server returns challenge + allowCredentials (user's registered passkeys)
+        3. Client calls navigator.credentials.get() with options
+        4. Client sends assertion to /auth/passkey/verify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                handle:
+                  type: string
+                  description: User handle to login
+              required: [handle]
+      responses:
+        "200":
+          description: WebAuthn options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasskeyLoginOptions"
+        "404":
+          description: User not found or no passkey registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/passkey/verify:
+    post:
+      tags: [Auth]
+      summary: Verify passkey assertion and login
+      security: []
+      description: |
+        Step 2 of passkey login. Verifies assertion from navigator.credentials.get().
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                handle:
+                  type: string
+                assertion:
+                  $ref: "#/components/schemas/PasskeyAssertion"
+                device:
+                  $ref: "#/components/schemas/DeviceBootstrap"
+                  description: Device info for new device login
+                deviceKeys:
+                  $ref: "#/components/schemas/InitialKeys"
+                  description: Keys for new device (if new device)
+              required: [handle, assertion]
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid assertion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+              required: [refreshToken]
+      responses:
+        "200":
+          description: New tokens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout current session
+      description: |
+        Invalidates the current session for this device.
+        Revokes the refresh token (access token expires naturally or via jti blacklist).
+      responses:
+        "204":
+          description: Logged out
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ============================================================
+  # USER PROFILE & DISCOVERY
+  # ============================================================
+  /me:
+    get:
+      tags: [Users]
+      summary: Get my profile
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    patch:
+      tags: [Users]
+      summary: Update my profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    delete:
+      tags: [Privacy]
+      summary: Delete my account
+      description: |
+        Permanently deletes account and all associated data.
+        Requires EITHER password confirmation OR passkey assertion.
+        This action is IRREVERSIBLE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/DeleteAccountWithPassword"
+                - $ref: "#/components/schemas/DeleteAccountWithPasskey"
+      responses:
+        "204":
+          description: Account deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /me/nuke:
+    post:
+      tags: [Privacy]
+      summary: Nuclear option - delete everything (2-step or instant)
+      description: |
+        Emergency data deletion:
+        - Deletes all messages (sent & received)
+        - Deletes all devices and sessions
+        - Deletes all keys
+        - Deletes account
+        - Notifies federated servers to purge cached data
+
+        **Two modes:**
+
+        **1. Standard Nuke (30-second delay):**
+        - Request nuke → server returns `nukeToken` + 30 sec countdown
+        - Confirm with same device within 30 sec
+        - Allows "oh shit I didn't mean that" recovery
+
+        **2. Instant Nuke (device key confirmation):**
+        - Requires `deviceKeySignature`: sign the nuke request with device private key
+        - Bypasses delay - immediate deletion
+        - Use when device is about to be seized/compromised
+
+        **Why device key?** Even if auth token is stolen, attacker can't nuke
+        without access to the device's private key stored in secure enclave.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [standard, instant]
+                  default: standard
+                nukeToken:
+                  type: string
+                  description: Token from initial nuke request (for confirmation step)
+                deviceKeySignature:
+                  type: string
+                  description: |
+                    For instant mode: Ed25519 signature of "NUKE:{userId}:{timestamp}"
+                    using device private key. Proves physical device possession.
+      responses:
+        "200":
+          description: Nuke initiated (standard mode) - returns token for confirmation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nukeToken:
+                    type: string
+                  expiresAt:
+                    type: string
+                    format: date-time
+                  countdown:
+                    type: integer
+                    example: 30
+                required: [nukeToken, expiresAt, countdown]
+        "204":
+          description: Account nuked (confirmation or instant mode)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Invalid device signature (instant mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /me/export:
+    get:
+      tags: [Privacy]
+      summary: Export all my data (GDPR compliance)
+      description: Returns a downloadable archive of all user data
+      responses:
+        "200":
+          description: Data export
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataExport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /me/passkey/options:
+    post:
+      tags: [Auth]
+      summary: Get WebAuthn challenge for adding a passkey to my account
+      description: |
+        Step 1: returns WebAuthn options for navigator.credentials.create().
+        Requires authenticated session. Use this to add passkey to password-registered account.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deviceName:
+                  type: string
+                  description: Optional label for the passkey/device
+      responses:
+        "200":
+          description: WebAuthn options for registration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasskeyRegistrationOptions"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /me/passkey:
+    post:
+      tags: [Auth]
+      summary: Add a passkey to my account
+      description: |
+        Step 2: client submits navigator.credentials.create() attestation.
+        Server stores passkey credential bound to the user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                attestation:
+                  $ref: "#/components/schemas/PasskeyAttestation"
+              required: [attestation]
+      responses:
+        "201":
+          description: Passkey added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /users/resolve:
+    get:
+      tags: [Users]
+      summary: Resolve handle to user info
+      description: |
+        Resolves a user handle to their public info.
+        Supports federated handles: `user@server.com`
+
+        **Enumeration Protection:**
+        This endpoint is an "oracle" - attackers can probe for valid handles.
+
+        **Mitigations:**
+        1. **Rate limiting**: 10 req/min per IP, 100 req/min per auth user
+        2. **Proof-of-work**: Optional `X-Proof-Of-Work` header for unauthenticated
+        3. **Constant-time response**: 404 takes same time as 200
+        4. **No wildcard/fuzzy**: Exact match only, no "did you mean?"
+        5. **Honeypot handles**: Reserved handles that trigger alerts
+
+        **Privacy-first alternative (V2):**
+        Clients exchange handles out-of-band (QR code, NFC, verbal).
+        This endpoint becomes optional "convenience" feature.
+
+        **Production note:** High-security deployments MAY disable this endpoint
+        entirely, requiring out-of-band handle exchange only.
+      parameters:
+        - name: handle
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 64
+          example: "alice@serverB.com"
+        - name: X-Proof-Of-Work
+          in: header
+          required: false
+          schema:
+            type: string
+          description: |
+            Hashcash stamp (required for unauthenticated requests).
+            Format: `version:bits:date:resource:rand:counter`
+            Example: `1:20:20260113:resolve:abcd1234:00000f`
+            Bits: minimum 20 (adjustable server-side based on load)
+      responses:
+        "200":
+          description: User found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResolveResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ============================================================
+  # DEVICE MANAGEMENT
+  # ============================================================
+  /devices:
+    get:
+      tags: [Devices]
+      summary: List my devices
+      responses:
+        "200":
+          description: Device list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Device"
+                required: [devices]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      tags: [Devices]
+      summary: Add new device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddDeviceRequest"
+      responses:
+        "201":
+          description: Device added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /devices/{deviceId}:
+    delete:
+      tags: [Devices]
+      summary: Revoke/logout a device
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "204":
+          description: Device revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /devices/revoke-all:
+    post:
+      tags: [Devices, Privacy]
+      summary: Logout from ALL devices
+      description: |
+        Revokes all devices except current one.
+        Use when you suspect unauthorized access.
+      responses:
+        "200":
+          description: All devices revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revokedCount:
+                    type: integer
+                    example: 3
+                required: [revokedCount]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /devices/revoke-all-including-current:
+    post:
+      tags: [Devices, Privacy]
+      summary: Logout from ALL devices including current
+      description: Emergency logout from everywhere
+      responses:
+        "204":
+          description: All devices revoked, session ended
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ============================================================
+  # KEY MANAGEMENT (Signal Protocol)
+  # ============================================================
+  /keys/prekey-bundle/{userId}:
+    get:
+      tags: [Keys]
+      summary: Get prekey bundle for session establishment
+      description: |
+        Returns prekey bundle for initiating encrypted session.
+        For federated users, proxies request to their home server.
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - name: deviceId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Specific device (optional, server picks primary if omitted)
+      responses:
+        "200":
+          description: Prekey bundle
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreKeyBundle"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /keys/upload:
+    post:
+      tags: [Keys]
+      summary: Upload new prekeys
+      description: |
+        Upload signed prekey and one-time prekeys.
+        Should be called when one-time prekeys are running low.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadKeysRequest"
+      responses:
+        "200":
+          description: Keys uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  remainingOneTimeKeys:
+                    type: integer
+                    description: How many one-time keys left on server
+                  serverTime:
+                    type: string
+                    format: date-time
+                required: [ok, remainingOneTimeKeys, serverTime]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /keys/count:
+    get:
+      tags: [Keys]
+      summary: Get remaining one-time prekey count
+      description: Check if you need to upload more prekeys
+      responses:
+        "200":
+          description: Key count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  oneTimeKeyCount:
+                    type: integer
+                    example: 42
+                  recommendedMinimum:
+                    type: integer
+                    example: 20
+                required: [oneTimeKeyCount, recommendedMinimum]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ============================================================
+  # MESSAGING (with Sealed Sender & Disappearing Messages)
+  # ============================================================
+  /messages/send:
+    post:
+      tags: [Messages]
+      summary: Send encrypted message
+      description: |
+        Sends an encrypted message. Supports:
+        - **Sealed Sender**: Hide sender identity from server
+        - **Disappearing**: Auto-delete after read
+        - **Federated**: Cross-server delivery
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "202":
+          description: Message accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Recipient not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Payload too large (max 256KB)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /messages/send-sealed:
+    post:
+      tags: [Messages]
+      summary: Send message with sealed sender (anonymous)
+      security: []
+      description: |
+        **SEALED SENDER**: Server cannot see who sent the message.
+
+        How it works:
+        1. Client encrypts sender identity inside the message payload
+        2. Client uses a temporary "delivery token" (obtained earlier)
+        3. Server only sees: delivery token + recipient + ciphertext
+        4. Recipient decrypts to reveal sender identity
+
+        Requires pre-obtained delivery token from recipient.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SealedMessageRequest"
+      responses:
+        "202":
+          description: Sealed message accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResponse"
+        "403":
+          description: Invalid delivery token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /messages/pending:
+    get:
+      tags: [Messages]
+      summary: Fetch pending messages
+      description: |
+        Long-poll endpoint for receiving messages.
+        Supports waitSeconds for real-time experience without WebSocket.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: waitSeconds
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 30
+            default: 0
+          description: Long-poll timeout (0 = immediate return)
+      responses:
+        "200":
+          description: Pending messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingMessagesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /messages/ack:
+    post:
+      tags: [Messages]
+      summary: Acknowledge received messages
+      description: |
+        Marks messages as delivered, server deletes them from queue.
+
+        **Metadata Privacy Warning:**
+        ACKs reveal timing information ("user came online at X").
+
+        **Privacy modes (client-side behavior guidance):**
+        - `immediate`: ACK right after decrypt (default, reveals online status)
+        - `batched`: Client collects ACKs, sends in random-delayed batches
+        - `stealth`: ACK with random 1-60 min delay (max privacy)
+
+        Server doesn't enforce these - it's client UX guidance.
+        The `ackMode` field documents client intent for analytics/debugging.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AckMessagesRequest"
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  ackedCount:
+                    type: integer
+                required: [ok, ackedCount]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /messages/delete-all:
+    delete:
+      tags: [Messages, Privacy]
+      summary: Delete all my messages from server
+      description: |
+        Deletes all pending messages for this device.
+        Does NOT delete messages already delivered to recipients.
+      responses:
+        "200":
+          description: Messages deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deletedCount:
+                    type: integer
+                required: [deletedCount]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /messages/delivery-token:
+    post:
+      tags: [Messages]
+      summary: Generate delivery token for sealed sender
+      description: |
+        Creates a delivery token for receiving sealed (anonymous) messages.
+
+        **Anti-spam/DoS constraints:**
+        - `forSender`: REQUIRED - no "open" tokens allowed
+        - `singleUse`: Token invalidated after first use
+        - `maxPayloadBytes`: Limit message size
+        - `requireProofOfWork`: Optional hashcash-style PoW
+
+        **Server-side enforcement:**
+        - Token hash stored, not plaintext (prevents token leak exploitation)
+        - IP rate limiting on /messages/send-sealed
+        - Max 10 active tokens per user
+
+        **Validation steps (server MUST enforce on /messages/send-sealed):**
+        1. Token is stored as SHA256 hash (constant-time compare)
+        2. Token is not expired (expiresAt check)
+        3. Token not used before (single-use flag)
+        4. Payload size <= maxPayloadBytes
+        5. Sender scope check:
+           - `user_id`: senderUserId must match UUID exactly
+           - `handle`: senderFullHandle must match exactly
+           - `server_domain`: sender's homeServer domain must match
+        6. If `requireProofOfWork=true`: verify Hashcash bits >= difficulty (20)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                forSenderType:
+                  type: string
+                  enum: [user_id, handle, server_domain]
+                  description: |
+                    Type of sender restriction:
+                    - `user_id`: Specific user by UUID
+                    - `handle`: Specific user by handle (e.g., alice@server.com)
+                    - `server_domain`: Any user from a server (e.g., otherserver.com)
+                forSenderValue:
+                  type: string
+                  description: |
+                    Value matching forSenderType:
+                    - user_id: UUID (e.g., "550e8400-e29b-41d4-a716-446655440000")
+                    - handle: Full handle (e.g., "alice@otherserver.com")
+                    - server_domain: Domain only (e.g., "otherserver.com")
+                  example: "alice@otherserver.com"
+                expiresInSeconds:
+                  type: integer
+                  minimum: 60
+                  maximum: 86400
+                  default: 3600
+                  description: Max 24 hours (shorter = safer)
+                maxPayloadBytes:
+                  type: integer
+                  minimum: 1024
+                  maximum: 262144
+                  default: 65536
+                  description: Max ciphertext size (default 64KB)
+                requireProofOfWork:
+                  type: boolean
+                  default: false
+                  description: |
+                    If true, sender must include X-Proof-Of-Work header.
+                    Format: hashcash stamp with difficulty 20.
+              required: [forSenderType, forSenderValue]
+      responses:
+        "201":
+          description: Delivery token created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryToken"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: Too many active tokens (max 10)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ============================================================
+  # VOICE CALLS
+  # ============================================================
+  /calls/turn-credentials:
+    get:
+      tags: [Calls]
+      summary: Get ephemeral TURN server credentials
+      description: |
+        Returns short-lived TURN credentials for WebRTC media relay.
+
+        **Why TURN matters for privacy:**
+        - Without TURN: Peer-to-peer reveals your IP to call recipient
+        - With TURN: All media routed through relay, IPs hidden from each other
+
+        **Credentials:**
+        - Ephemeral: Valid for 24 hours max
+        - Per-call: Generate new credentials for each call
+        - HMAC-based: Username encodes expiry, password is HMAC
+
+        **Server deployment:**
+        - Self-hosted coturn recommended for max privacy
+        - Commercial TURN (Twilio, Cloudflare) = third party sees metadata
+      responses:
+        "200":
+          description: TURN credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnCredentials"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: Too many credential requests (max 10/hour)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /calls/invite:
+    post:
+      tags: [Calls]
+      summary: Send call invite
+      description: Initiates encrypted voice call
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallInviteRequest"
+      responses:
+        "202":
+          description: Invite sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallInviteResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /calls/signal:
+    post:
+      tags: [Calls]
+      summary: Send call signaling (answer, ICE, hangup)
+      description: Send WebRTC signaling data for ongoing call
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallSignalRequest"
+      responses:
+        "202":
+          description: Signal sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Call not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /calls/events/pending:
+    get:
+      tags: [Calls]
+      summary: Fetch pending call events
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: waitSeconds
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Pending call events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingCallEventsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /calls/events/ack:
+    post:
+      tags: [Calls]
+      summary: Acknowledge call events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AckCallEventsRequest"
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  ackedCount:
+                    type: integer
+                required: [ok, ackedCount]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ============================================================
+  # PUSH NOTIFICATIONS
+  # ============================================================
+  /push/token:
+    put:
+      tags: [Push]
+      summary: Set push notification token
+      description: |
+        Register FCM/APNS token for push notifications.
+
+        **Privacy Note**: Using FCM/APNS means Google/Apple sees
+        that you received a notification. For maximum privacy,
+        use long-polling instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertPushTokenRequest"
+      responses:
+        "200":
+          description: Token saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    delete:
+      tags: [Push, Privacy]
+      summary: Remove push token (disable notifications)
+      description: Disables push notifications for this device
+      responses:
+        "204":
+          description: Token removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ============================================================
+  # FEDERATION (Server-to-Server)
+  # ============================================================
+  /federation/inbox:
+    post:
+      tags: [Federation]
+      summary: Receive federated message (S2S)
+      security:
+        - federationAuth: []
+      description: |
+        Server-to-server endpoint for receiving messages
+        from other federation nodes.
+
+        Requires Ed25519 request signature (see federationAuth security scheme).
+      parameters:
+        - name: X-Server-Origin
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uri
+          description: Source server URL (e.g., https://serverA.com)
+          example: "https://otherserver.com"
+        - name: X-Server-Key-Id
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Public key identifier for signature verification
+          example: "key-2025-01"
+        - name: X-Timestamp
+          in: header
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Request timestamp (max ±5 min skew)
+        - name: X-Nonce
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 16
+            maxLength: 64
+          description: Unique nonce for replay protection (16-64 chars)
+          example: "a1b2c3d4e5f6g7h8i9j0"
+        - name: X-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: |
+            Base64 Ed25519 signature of canonical request:
+            `METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + NONCE + "\n" + SHA256(BODY)`
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FederatedEnvelope"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "401":
+          description: Invalid federation signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found on this server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /federation/keys/{userId}:
+    get:
+      tags: [Federation]
+      summary: Get user's prekey bundle (S2S)
+      security:
+        - federationAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Prekey bundle
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreKeyBundle"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /federation/user-deleted:
+    post:
+      tags: [Federation]
+      summary: Notify of user deletion (S2S)
+      security:
+        - federationAuth: []
+      description: |
+        Notifies this server that a federated user was deleted.
+        Server should remove any cached data for that user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+                  format: uuid
+                handle:
+                  type: string
+                homeServer:
+                  type: string
+                  format: uri
+                deletedAt:
+                  type: string
+                  format: date-time
+              required: [userId, handle, homeServer, deletedAt]
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /federation/servers:
+    get:
+      tags: [Federation]
+      summary: List known federation servers
+      security: []
+      responses:
+        "200":
+          description: Server list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  servers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FederatedServer"
+                required: [servers]
+
+# ============================================================
+# COMPONENTS
+# ============================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: User authentication token
+
+    federationAuth:
+      type: apiKey
+      in: header
+      name: X-Signature
+      description: |
+        Server-to-server authentication via Ed25519 request signing.
+
+        **Required Headers:**
+        - `X-Server-Origin`: Source server URL (e.g., https://serverA.com)
+        - `X-Server-Key-Id`: Public key identifier for rotation (e.g., key-2025-01)
+        - `X-Timestamp`: ISO 8601 timestamp (max ±5 min skew)
+        - `X-Nonce`: Random 16+ char string (replay protection)
+        - `X-Signature`: Base64 Ed25519 signature
+
+        **Signature Computation:**
+        ```
+        canonical = HTTP_METHOD + "\n"
+                  + REQUEST_PATH + "\n"
+                  + X-Timestamp + "\n"
+                  + X-Nonce + "\n"
+                  + SHA256_HEX(request_body)
+
+        signature = Base64(Ed25519.sign(canonical, server_private_key))
+        ```
+
+        **Verification:**
+        1. Check X-Timestamp within ±5 minutes
+        2. Check X-Nonce not seen from this origin in last 5 min (replay)
+        3. Fetch sender's public key from `/.well-known/ikincikanal-server`
+        4. Verify signature matches canonical request
+        5. Cache (origin, nonce) for 5 min
+
+        **Key Rotation:**
+        - Rotate keys monthly (recommended)
+        - Old keys valid for 7 days after rotation
+        - Key ID format: `key-YYYY-MM`
+
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 128
+      description: Client-generated key to prevent duplicate sends
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: UNAUTHORIZED
+            message: Missing or invalid token
+
+    Forbidden:
+      description: Access denied
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: FORBIDDEN
+            message: Not allowed
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: NOT_FOUND
+            message: Resource not found
+
+    Conflict:
+      description: Conflict (duplicate)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: CONFLICT
+            message: Already exists
+
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: RATE_LIMITED
+            message: Too many requests
+
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationError"
+
+  schemas:
+    # ==================== COMMON ====================
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+      required: [code, message]
+
+    ValidationError:
+      type: object
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+        fields:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              message:
+                type: string
+            required: [path, message]
+      required: [code, message, fields]
+
+    # ==================== HEALTH ====================
+    HealthResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        service:
+          type: string
+          example: ikincikanal-api
+        version:
+          type: string
+          example: 0.2.0
+        time:
+          type: string
+          format: date-time
+        federation:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            serverHandle:
+              type: string
+              example: "@ikincikanal.com"
+            connectedServers:
+              type: integer
+              example: 5
+          required: [enabled, serverHandle, connectedServers]
+      required: [ok, service, version, time, federation]
+
+    ServerDiscovery:
+      type: object
+      properties:
+        serverHandle:
+          type: string
+          example: "@ikincikanal.com"
+        version:
+          type: string
+          example: "0.2.0"
+        preferredKeyId:
+          type: string
+          example: "key-2025-01"
+          description: Key ID that should be used for new signatures
+        publicKeys:
+          type: array
+          description: Public keys available for signature verification (rotation supported)
+          items:
+            type: object
+            properties:
+              keyId:
+                type: string
+                example: "key-2025-01"
+              publicKey:
+                type: string
+                description: Server Ed25519 public key (base64)
+              status:
+                type: string
+                enum: [active, deprecated]
+                description: deprecated keys remain valid during overlap window
+              notBefore:
+                type: string
+                format: date-time
+                nullable: true
+              notAfter:
+                type: string
+                format: date-time
+                nullable: true
+            required: [keyId, publicKey, status]
+        endpoints:
+          type: object
+          properties:
+            api:
+              type: string
+              format: uri
+            federation:
+              type: string
+              format: uri
+          required: [api, federation]
+        capabilities:
+          type: array
+          items:
+            type: string
+          example: ["sealed-sender", "disappearing-messages", "voice-calls"]
+      required: [serverHandle, version, preferredKeyId, publicKeys, endpoints, capabilities]
+
+    # ==================== AUTH ====================
+    RegisterRequest:
+      type: object
+      description: |
+        Register with EITHER password OR passkey (not both).
+        Passkey is preferred for security.
+      properties:
+        handle:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: "^[a-zA-Z0-9_\\.]+$"
+          example: fatih
+        password:
+          type: string
+          minLength: 12
+          maxLength: 128
+          description: |
+            Password auth (fallback). Min 12 chars.
+            Storage: Argon2id (time=3, mem=64MB, parallel=4).
+            Mutually exclusive with passkey.
+        passkey:
+          $ref: "#/components/schemas/PasskeyAttestation"
+          description: |
+            **Preferred.** WebAuthn attestation from navigator.credentials.create().
+            Mutually exclusive with password.
+        device:
+          $ref: "#/components/schemas/DeviceBootstrap"
+        keys:
+          $ref: "#/components/schemas/InitialKeys"
+        acceptedPrivacyVersion:
+          type: string
+          example: "2025-01-01"
+          description: Version of privacy policy accepted
+      required: [handle, device, keys, acceptedPrivacyVersion]
+      oneOf:
+        - required: [password]
+          properties:
+            passkey:
+              not: {}
+        - required: [passkey]
+          properties:
+            password:
+              not: {}
+
+    PasswordLoginRequest:
+      type: object
+      description: |
+        Password-based login (fallback for devices without passkey).
+        MUST provide EITHER deviceId (existing device) OR newDevice+newDeviceKeys (new device).
+      oneOf:
+        - title: Existing device login
+          type: object
+          properties:
+            handle:
+              type: string
+            password:
+              type: string
+            deviceId:
+              type: string
+              format: uuid
+              description: Existing device ID (for re-login)
+          required: [handle, password, deviceId]
+        - title: New device login
+          type: object
+          properties:
+            handle:
+              type: string
+            password:
+              type: string
+            newDevice:
+              $ref: "#/components/schemas/DeviceBootstrap"
+              description: New device info (for login from new device)
+            newDeviceKeys:
+              $ref: "#/components/schemas/InitialKeys"
+              description: Keys for new device (required with newDevice)
+          required: [handle, password, newDevice, newDeviceKeys]
+
+    PasskeyLoginOptions:
+      type: object
+      description: WebAuthn options for passkey login (step 1 response)
+      properties:
+        challenge:
+          type: string
+          description: Base64URL encoded challenge
+        timeout:
+          type: integer
+          example: 60000
+          description: Timeout in milliseconds
+        rpId:
+          type: string
+          example: "ikincikanal.com"
+          description: Relying party ID
+        allowCredentials:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                description: Base64URL credential ID
+              type:
+                type: string
+                enum: [public-key]
+              transports:
+                type: array
+                items:
+                  type: string
+                  enum: [usb, nfc, ble, internal, hybrid]
+            required: [id, type]
+        userVerification:
+          type: string
+          enum: [required, preferred, discouraged]
+          default: preferred
+      required: [challenge, timeout, rpId, allowCredentials]
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          example: 3600
+        user:
+          $ref: "#/components/schemas/User"
+        device:
+          $ref: "#/components/schemas/Device"
+      required: [accessToken, refreshToken, tokenType, expiresIn, user, device]
+
+    # ==================== USER ====================
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+          example: fatih
+        fullHandle:
+          type: string
+          example: fatih@ikincikanal.com
+          description: Full federated handle
+        homeServer:
+          type: string
+          example: ikincikanal.com
+        displayName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, suspended]
+        settings:
+          $ref: "#/components/schemas/UserSettings"
+      required: [id, handle, fullHandle, homeServer, createdAt, status]
+
+    UserSettings:
+      type: object
+      properties:
+        defaultDisappearingSeconds:
+          type: integer
+          nullable: true
+          description: Default disappearing message timer (null = never)
+        allowSealedSender:
+          type: boolean
+          default: true
+          description: Accept sealed sender messages
+        readReceipts:
+          type: boolean
+          default: false
+          description: Send read receipts (privacy tradeoff)
+        typingIndicators:
+          type: boolean
+          default: false
+          description: Send typing indicators (privacy tradeoff)
+
+    UserResolveResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        fullHandle:
+          type: string
+        homeServer:
+          type: string
+        hasDevice:
+          type: boolean
+        isFederated:
+          type: boolean
+          description: True if user is on different server
+      required: [id, handle, fullHandle, homeServer, hasDevice, isFederated]
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+          maxLength: 64
+          nullable: true
+        settings:
+          $ref: "#/components/schemas/UserSettings"
+
+    DataExport:
+      type: object
+      properties:
+        exportedAt:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/User"
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/Device"
+        messageCount:
+          type: integer
+          description: Number of pending messages (content not included - E2E encrypted)
+      required: [exportedAt, user, devices, messageCount]
+
+    # ==================== DEVICE ====================
+    Device:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        deviceName:
+          type: string
+          example: "iPhone 15 Pro"
+        registrationId:
+          type: integer
+        identityKeyPub:
+          type: string
+          description: Base64 Ed25519 public key
+        createdAt:
+          type: string
+          format: date-time
+        lastActiveAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, userId, deviceName, registrationId, identityKeyPub, createdAt, lastActiveAt]
+
+    DeviceBootstrap:
+      type: object
+      properties:
+        deviceName:
+          type: string
+          maxLength: 64
+        registrationId:
+          type: integer
+          minimum: 1
+          maximum: 16380
+        identityKeyPub:
+          type: string
+          description: Base64 Ed25519 public key
+      required: [deviceName, registrationId, identityKeyPub]
+
+    AddDeviceRequest:
+      type: object
+      properties:
+        device:
+          $ref: "#/components/schemas/DeviceBootstrap"
+        keys:
+          $ref: "#/components/schemas/InitialKeys"
+      required: [device, keys]
+
+    # ==================== KEYS ====================
+    InitialKeys:
+      type: object
+      properties:
+        signedPreKey:
+          $ref: "#/components/schemas/SignedPreKey"
+        oneTimePreKeys:
+          type: array
+          minItems: 10
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/OneTimePreKey"
+      required: [signedPreKey, oneTimePreKeys]
+
+    SignedPreKey:
+      type: object
+      properties:
+        keyId:
+          type: integer
+        publicKey:
+          type: string
+          description: Base64 X25519 public key
+        signature:
+          type: string
+          description: Base64 Ed25519 signature
+      required: [keyId, publicKey, signature]
+
+    OneTimePreKey:
+      type: object
+      properties:
+        keyId:
+          type: integer
+        publicKey:
+          type: string
+          description: Base64 X25519 public key
+      required: [keyId, publicKey]
+
+    UploadKeysRequest:
+      type: object
+      properties:
+        signedPreKey:
+          $ref: "#/components/schemas/SignedPreKey"
+        oneTimePreKeys:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/OneTimePreKey"
+      required: [signedPreKey, oneTimePreKeys]
+
+    PreKeyBundle:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        deviceId:
+          type: string
+          format: uuid
+        registrationId:
+          type: integer
+        identityKeyPub:
+          type: string
+        signedPreKey:
+          $ref: "#/components/schemas/SignedPreKey"
+        oneTimePreKey:
+          allOf:
+            - $ref: "#/components/schemas/OneTimePreKey"
+          nullable: true
+          description: May be null if exhausted
+      required: [userId, deviceId, registrationId, identityKeyPub, signedPreKey]
+
+    # ==================== MESSAGES ====================
+    SendMessageRequest:
+      type: object
+      properties:
+        toUserId:
+          type: string
+          format: uuid
+        toDeviceId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Specific device or null for all devices
+        clientMessageId:
+          type: string
+          format: uuid
+        ciphertext:
+          type: string
+          description: Base64 encrypted message (max 256KB)
+          maxLength: 350000
+        envelopeType:
+          type: string
+          enum: [prekey_message, signal_message]
+        sentAt:
+          type: string
+          format: date-time
+        disappearingSeconds:
+          type: integer
+          nullable: true
+          minimum: 5
+          maximum: 604800
+          description: |
+            **CLIENT-SIDE** auto-delete timer (NOT server-side).
+
+            - Triggered when: Recipient DECRYPTS and READS the message
+            - Timer starts: On first read
+            - Deleted by: CLIENT app from local storage
+            - Server knows: NOTHING about read status or deletion
+
+            This is different from `expiresAt` (server TTL):
+            - `expiresAt`: Server deletes UNDELIVERED messages after 7 days
+            - `disappearingSeconds`: Client deletes READ messages after N seconds
+
+            Values: 5 sec - 7 days (604800 sec), null = never auto-delete
+        urgent:
+          type: boolean
+          default: false
+          description: Trigger push notification even in DND
+      required: [toUserId, clientMessageId, ciphertext, envelopeType, sentAt]
+
+    SealedMessageRequest:
+      type: object
+      description: |
+        Sealed sender message - server cannot see who sent it.
+        Sender identity is encrypted inside ciphertext.
+      properties:
+        deliveryToken:
+          type: string
+          description: Token obtained from recipient
+        toUserId:
+          type: string
+          format: uuid
+        toDeviceId:
+          type: string
+          format: uuid
+          nullable: true
+        clientMessageId:
+          type: string
+          format: uuid
+        sealedCiphertext:
+          type: string
+          description: |
+            Base64 sealed ciphertext containing:
+            - Sender identity (encrypted)
+            - Actual message ciphertext
+          maxLength: 360000
+        sentAt:
+          type: string
+          format: date-time
+      required: [deliveryToken, toUserId, clientMessageId, sealedCiphertext, sentAt]
+
+    SendMessageResponse:
+      type: object
+      properties:
+        serverMessageId:
+          type: string
+          format: uuid
+        receivedAt:
+          type: string
+          format: date-time
+        queued:
+          type: boolean
+      required: [serverMessageId, receivedAt, queued]
+
+    PendingMessagesResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingMessage"
+        serverTime:
+          type: string
+          format: date-time
+        moreAvailable:
+          type: boolean
+          description: True if more messages waiting
+      required: [messages, serverTime, moreAvailable]
+
+    PendingMessage:
+      type: object
+      properties:
+        serverMessageId:
+          type: string
+          format: uuid
+        fromUserId:
+          type: string
+          format: uuid
+          nullable: true
+          description: null for sealed sender messages
+        fromDeviceId:
+          type: string
+          format: uuid
+          nullable: true
+        clientMessageId:
+          type: string
+        ciphertext:
+          type: string
+        envelopeType:
+          type: string
+          enum: [prekey_message, signal_message, sealed_sender]
+        receivedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: When server will auto-delete undelivered message
+        disappearingSeconds:
+          type: integer
+          nullable: true
+          description: Auto-delete timer after read (if set by sender)
+      required: [serverMessageId, clientMessageId, ciphertext, envelopeType, receivedAt, expiresAt]
+
+    AckMessagesRequest:
+      type: object
+      properties:
+        serverMessageIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: string
+            format: uuid
+        ackMode:
+          type: string
+          enum: [immediate, batched, stealth]
+          default: immediate
+          description: |
+            Client privacy behavior (informational, not enforced):
+            - immediate: ACK right after reading
+            - batched: Collected and sent in batches with random delay
+            - stealth: Random 1-60 min delay before ACK
+
+            **Privacy note:** Server does NOT persist ackMode. Used only for
+            ephemeral debugging/metrics during request processing, then discarded.
+      required: [serverMessageIds]
+
+    DeliveryToken:
+      type: object
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        forUserId:
+          type: string
+          format: uuid
+          nullable: true
+      required: [token, expiresAt]
+
+    # ==================== CALLS ====================
+    CallInviteRequest:
+      type: object
+      properties:
+        toUserId:
+          type: string
+          format: uuid
+        toDeviceId:
+          type: string
+          format: uuid
+          nullable: true
+        callId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [audio, video]
+        encryptedOffer:
+          type: string
+          description: Base64 encrypted SDP offer
+        createdAt:
+          type: string
+          format: date-time
+      required: [toUserId, callId, type, encryptedOffer, createdAt]
+
+    CallInviteResponse:
+      type: object
+      properties:
+        callId:
+          type: string
+          format: uuid
+        accepted:
+          type: boolean
+        receivedAt:
+          type: string
+          format: date-time
+      required: [callId, accepted, receivedAt]
+
+    CallSignalRequest:
+      type: object
+      properties:
+        callId:
+          type: string
+          format: uuid
+        toUserId:
+          type: string
+          format: uuid
+        toDeviceId:
+          type: string
+          format: uuid
+          nullable: true
+        signalType:
+          type: string
+          enum: [answer, ice, hangup, reject, busy]
+        encryptedPayload:
+          type: string
+          description: Base64 encrypted signaling data
+      required: [callId, toUserId, signalType, encryptedPayload]
+
+    PendingCallEventsResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingCallEvent"
+        serverTime:
+          type: string
+          format: date-time
+      required: [events, serverTime]
+
+    PendingCallEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        callId:
+          type: string
+          format: uuid
+        fromUserId:
+          type: string
+          format: uuid
+        fromDeviceId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          enum: [invite, answer, ice, hangup, reject, busy]
+        encryptedPayload:
+          type: string
+        receivedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: |
+            When server will auto-delete the event if not acknowledged.
+            Default: 5 minutes after receivedAt (configurable server-side).
+      required: [eventId, callId, fromUserId, fromDeviceId, eventType, encryptedPayload, receivedAt, expiresAt]
+
+    AckCallEventsRequest:
+      type: object
+      properties:
+        eventIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: string
+            format: uuid
+      required: [eventIds]
+
+    # ==================== PUSH ====================
+    UpsertPushTokenRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [fcm, apns, unified_push]
+          description: |
+            - fcm: Firebase Cloud Messaging (Google)
+            - apns: Apple Push Notification Service
+            - unified_push: Self-hosted (most private)
+        token:
+          type: string
+          minLength: 10
+        endpoint:
+          type: string
+          format: uri
+          description: Required for unified_push
+        appBundleId:
+          type: string
+          nullable: true
+      required: [provider, token]
+
+    # ==================== TURN/WEBRTC ====================
+    TurnCredentials:
+      type: object
+      description: Ephemeral TURN server credentials for WebRTC
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+          example:
+            - "turn:turn.ikincikanal.com:3478?transport=udp"
+            - "turn:turn.ikincikanal.com:3478?transport=tcp"
+            - "turns:turn.ikincikanal.com:5349?transport=tcp"
+        username:
+          type: string
+          description: Ephemeral username (encodes expiry timestamp)
+          example: "1705176000:user123"
+        credential:
+          type: string
+          description: HMAC-SHA1 of username with shared secret
+        ttlSeconds:
+          type: integer
+          example: 86400
+          description: Credentials valid for this many seconds
+        expiresAt:
+          type: string
+          format: date-time
+        iceTransportPolicy:
+          type: string
+          enum: [all, relay]
+          default: relay
+          description: |
+            - all: Try direct connection first, fallback to TURN
+            - relay: ALWAYS use TURN (hides IP, recommended for privacy)
+      required: [urls, username, credential, ttlSeconds, expiresAt, iceTransportPolicy]
+
+    # ==================== PASSKEY/WEBAUTHN ====================
+    PasskeyAttestation:
+      type: object
+      description: |
+        WebAuthn attestation for passkey REGISTRATION.
+        Response from navigator.credentials.create()
+      properties:
+        id:
+          type: string
+          description: Base64URL credential ID
+        rawId:
+          type: string
+          description: Base64URL raw credential ID
+        type:
+          type: string
+          enum: [public-key]
+        response:
+          type: object
+          properties:
+            clientDataJSON:
+              type: string
+              description: Base64URL encoded
+            attestationObject:
+              type: string
+              description: Base64URL encoded CBOR attestation
+            transports:
+              type: array
+              items:
+                type: string
+                enum: [usb, nfc, ble, internal, hybrid]
+              description: Supported transports for this credential
+          required: [clientDataJSON, attestationObject]
+        authenticatorAttachment:
+          type: string
+          enum: [platform, cross-platform]
+          description: platform = built-in (Face ID), cross-platform = security key
+      required: [id, rawId, type, response]
+
+    PasskeyAssertion:
+      type: object
+      description: |
+        WebAuthn assertion for passkey LOGIN.
+        Response from navigator.credentials.get()
+      properties:
+        id:
+          type: string
+          description: Base64URL credential ID
+        rawId:
+          type: string
+          description: Base64URL raw credential ID
+        type:
+          type: string
+          enum: [public-key]
+        response:
+          type: object
+          properties:
+            clientDataJSON:
+              type: string
+              description: Base64URL encoded
+            authenticatorData:
+              type: string
+              description: Base64URL encoded authenticator data
+            signature:
+              type: string
+              description: Base64URL encoded signature
+            userHandle:
+              type: string
+              nullable: true
+              description: Base64URL encoded user handle (may be null)
+          required: [clientDataJSON, authenticatorData, signature]
+        authenticatorAttachment:
+          type: string
+          enum: [platform, cross-platform]
+      required: [id, rawId, type, response]
+
+    # ==================== FEDERATION ====================
+    FederatedEnvelope:
+      type: object
+      description: |
+        Server-to-server message envelope.
+
+        **Authentication Note:**
+        The envelope itself is NOT signed. Instead, the entire HTTP request
+        is signed via X-Signature header (see /federation/inbox parameters).
+
+        This avoids "double signature" confusion:
+        - X-Signature: Authenticates the HTTP request (server identity)
+        - payload: Contains E2EE ciphertext (user-to-user encryption)
+      properties:
+        fromServer:
+          type: string
+          format: uri
+          description: Must match X-Server-Origin header
+        toUserId:
+          type: string
+          format: uuid
+        toDeviceId:
+          type: string
+          format: uuid
+          nullable: true
+        envelopeId:
+          type: string
+          format: uuid
+          description: Unique ID for deduplication (in addition to X-Nonce)
+        payloadType:
+          type: string
+          enum: [message, call_event, typing_indicator, read_receipt]
+          description: |
+            Hint for payload processing (payload itself is opaque/encrypted):
+            - message: E2EE chat message
+            - call_event: Call signaling (offer/answer/ice/hangup)
+            - typing_indicator: Ephemeral typing status
+            - read_receipt: Delivery/read confirmation
+        payload:
+          type: object
+          description: Encrypted content (opaque to federation layer, decrypted by recipient)
+        timestamp:
+          type: string
+          format: date-time
+          description: When the original action occurred (not request time)
+      required: [fromServer, toUserId, envelopeId, payloadType, payload, timestamp]
+
+    FederatedServer:
+      type: object
+      properties:
+        handle:
+          type: string
+          example: "@otherserver.com"
+        baseUrl:
+          type: string
+          format: uri
+        publicKey:
+          type: string
+        lastSeen:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [online, offline, unreachable]
+      required: [handle, baseUrl, publicKey, lastSeen, status]
+
+    # ==================== ACCOUNT DELETION ====================
+    DeleteAccountWithPassword:
+      type: object
+      properties:
+        password:
+          type: string
+          description: Current password for confirmation
+        confirmation:
+          type: string
+          enum: [DELETE_MY_ACCOUNT]
+          description: Must be exactly "DELETE_MY_ACCOUNT"
+      required: [password, confirmation]
+
+    DeleteAccountWithPasskey:
+      type: object
+      properties:
+        confirmation:
+          type: string
+          enum: [DELETE_MY_ACCOUNT]
+          description: Must be exactly "DELETE_MY_ACCOUNT"
+        assertion:
+          $ref: "#/components/schemas/PasskeyAssertion"
+          description: WebAuthn assertion proving account ownership
+      required: [confirmation, assertion]
+
+    # ==================== PASSKEY REGISTRATION ====================
+    PasskeyRegistrationOptions:
+      type: object
+      description: WebAuthn options for passkey registration (adding new passkey)
+      properties:
+        challenge:
+          type: string
+          description: Base64URL challenge
+        rp:
+          type: object
+          properties:
+            id:
+              type: string
+              example: "ikincikanal.com"
+            name:
+              type: string
+              example: "IKINCI KANAL"
+          required: [id, name]
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+              description: Base64URL user id
+            name:
+              type: string
+              description: Username/handle
+            displayName:
+              type: string
+          required: [id, name, displayName]
+        pubKeyCredParams:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [public-key]
+              alg:
+                type: integer
+                description: "COSE algorithm (-8 = EdDSA, -7 = ES256)"
+                example: -7
+            required: [type, alg]
+        timeout:
+          type: integer
+          example: 60000
+          description: Timeout in milliseconds
+        authenticatorSelection:
+          type: object
+          properties:
+            authenticatorAttachment:
+              type: string
+              enum: [platform, cross-platform]
+            residentKey:
+              type: string
+              enum: [required, preferred, discouraged]
+            userVerification:
+              type: string
+              enum: [required, preferred, discouraged]
+        attestation:
+          type: string
+          enum: [none, indirect, direct, enterprise]
+          default: none
+      required: [challenge, rp, user, pubKeyCredParams, timeout]

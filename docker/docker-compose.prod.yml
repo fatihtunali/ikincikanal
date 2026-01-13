@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: ikincikanal-api
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ACCESS_EXPIRY=15m
+      - JWT_REFRESH_EXPIRY=30d
+      - PORT=3000
+      - HOME_SERVER=${HOME_SERVER:-ikincikanal.com}
+      - WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID:-ikincikanal.com}
+      - WEBAUTHN_RP_NAME=IKINCI KANAL
+      - WEBAUTHN_ORIGIN=${WEBAUTHN_ORIGIN:-https://ikincikanal.com}
+      - TURN_SECRET=${TURN_SECRET}
+      - TURN_SERVERS=${TURN_SERVERS:-turn:turn.ikincikanal.com:3478}
+    ports:
+      - "3000:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ikincikanal-redis
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Cleanup job for expired data
+  cleanup:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: ikincikanal-cleanup
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+    command: ["node", "-e", "require('./apps/api/dist/cleanup.js')"]
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+networks:
+  default:
+    name: ikincikanal-network

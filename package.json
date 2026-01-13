@@ -1,0 +1,25 @@
+{
+  "name": "ikinci-kanal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Decentralized secure messaging platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @ikinci-kanal/api",
+    "build": "npm run build -w @ikinci-kanal/api",
+    "test": "npm run test -w @ikinci-kanal/api",
+    "lint": "npm run lint -w @ikinci-kanal/api",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": "",
+  "license": "UNLICENSED"
+}

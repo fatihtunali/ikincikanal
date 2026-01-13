@@ -1,0 +1,238 @@
+// IKINCI KANAL - Prisma Schema
+// Based on DATA_MODEL.md specification
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  handle                 String    @unique @db.VarChar(32)
+  fullHandle             String    @unique @map("full_handle") @db.VarChar(128)
+  homeServer             String    @map("home_server") @db.VarChar(255)
+  displayName            String?   @map("display_name") @db.VarChar(64)
+  passwordHash           String?   @map("password_hash") @db.VarChar(255)
+  status                 String    @default("active") @db.VarChar(20)
+  settings               Json      @default("{}")
+  acceptedPrivacyVersion String?   @map("accepted_privacy_version") @db.VarChar(20)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  devices           Device[]
+  passkeys          Passkey[]
+  refreshTokens     RefreshToken[]
+  deliveryTokens    DeliveryToken[]
+  pushTokens        PushToken[]
+  receivedMessages  MessageQueue[]  @relation("MessageRecipient")
+  sentMessages      MessageQueue[]  @relation("MessageSender")
+  callEventsFrom    CallEvent[]     @relation("CallEventFrom")
+  callEventsTo      CallEvent[]     @relation("CallEventTo")
+  @@index([handle], name: "idx_users_handle")
+  @@index([fullHandle], name: "idx_users_full_handle")
+  @@map("users")
+}
+
+model Device {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  deviceName        String    @map("device_name") @db.VarChar(64)
+  registrationId    Int       @map("registration_id")
+  identityKeyPub    String    @map("identity_key_pub") @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  lastActiveAt      DateTime  @default(now()) @map("last_active_at") @db.Timestamptz
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz
+  revocationReason  String?   @map("revocation_reason") @db.VarChar(50)
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens     RefreshToken[]
+  signedPrekeys     SignedPrekey[]
+  oneTimePrekeys    OneTimePrekey[]
+  pushToken         PushToken?
+  receivedMessages  MessageQueue[]  @relation("MessageToDevice")
+  sentMessages      MessageQueue[]  @relation("MessageFromDevice")
+  callEventsFrom    CallEvent[]     @relation("CallEventFromDevice")
+  callEventsTo      CallEvent[]     @relation("CallEventToDevice")
+  @@unique([userId, registrationId], name: "unique_user_registration")
+  @@index([userId], name: "idx_devices_user_id")
+  @@map("devices")
+}
+
+model Passkey {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  credentialId      String    @unique @map("credential_id") @db.Text
+  publicKey         String    @map("public_key") @db.Text
+  counter           BigInt    @default(0)
+  transports        String[]  @db.Text
+  authenticatorType String?   @map("authenticator_type") @db.VarChar(20)
+  deviceName        String?   @map("device_name") @db.VarChar(64)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  lastUsedAt        DateTime? @map("last_used_at") @db.Timestamptz
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId], name: "idx_passkeys_user_id")
+  @@index([credentialId], name: "idx_passkeys_credential_id")
+  @@map("passkeys")
+}
+
+model RefreshToken {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String        @map("user_id") @db.Uuid
+  deviceId        String        @map("device_id") @db.Uuid
+  tokenHash       String        @unique @map("token_hash") @db.VarChar(64)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt       DateTime      @map("expires_at") @db.Timestamptz
+  revokedAt       DateTime?     @map("revoked_at") @db.Timestamptz
+  previousTokenId String?       @unique @map("previous_token_id") @db.Uuid
+  rotatedAt       DateTime?     @map("rotated_at") @db.Timestamptz
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device          Device        @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  previousToken   RefreshToken? @relation("TokenRotation", fields: [previousTokenId], references: [id])
+  nextToken       RefreshToken? @relation("TokenRotation")
+  @@index([userId], name: "idx_refresh_tokens_user_id")
+  @@index([deviceId], name: "idx_refresh_tokens_device_id")
+  @@index([tokenHash], name: "idx_refresh_tokens_hash")
+  @@map("refresh_tokens")
+}
+
+model SignedPrekey {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId  String   @map("device_id") @db.Uuid
+  keyId     Int      @map("key_id")
+  publicKey String   @map("public_key") @db.Text
+  signature String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  @@unique([deviceId, keyId], name: "unique_device_signed_prekey")
+  @@index([deviceId], name: "idx_signed_prekeys_device_id")
+  @@map("signed_prekeys")
+}
+
+model OneTimePrekey {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId   String    @map("device_id") @db.Uuid
+  keyId      Int       @map("key_id")
+  publicKey  String    @map("public_key") @db.Text
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz
+  device     Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  @@unique([deviceId, keyId], name: "unique_device_otp_key")
+  @@index([deviceId], name: "idx_otp_device_available")
+  @@map("one_time_prekeys")
+}
+
+model MessageQueue {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  serverMessageId    String    @unique @default(dbgenerated("gen_random_uuid()")) @map("server_message_id") @db.Uuid
+  toUserId           String    @map("to_user_id") @db.Uuid
+  toDeviceId         String?   @map("to_device_id") @db.Uuid
+  fromUserId         String?   @map("from_user_id") @db.Uuid
+  fromDeviceId       String?   @map("from_device_id") @db.Uuid
+  clientMessageId    String    @map("client_message_id") @db.Uuid
+  ciphertext         String    @db.Text
+  envelopeType       String    @map("envelope_type") @db.VarChar(30)
+  sentAt             DateTime  @map("sent_at") @db.Timestamptz
+  receivedAt         DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  expiresAt          DateTime  @map("expires_at") @db.Timestamptz
+  disappearingSeconds Int?     @map("disappearing_seconds")
+  idempotencyKey     String?   @map("idempotency_key") @db.VarChar(128)
+  toUser             User      @relation("MessageRecipient", fields: [toUserId], references: [id], onDelete: Cascade)
+  toDevice           Device?   @relation("MessageToDevice", fields: [toDeviceId], references: [id], onDelete: Cascade)
+  fromUser           User?     @relation("MessageSender", fields: [fromUserId], references: [id], onDelete: SetNull)
+  fromDevice         Device?   @relation("MessageFromDevice", fields: [fromDeviceId], references: [id], onDelete: SetNull)
+  @@unique([fromDeviceId, clientMessageId], name: "unique_idempotency")
+  @@index([toUserId], name: "idx_mq_to_user")
+  @@index([toDeviceId], name: "idx_mq_to_device")
+  @@index([expiresAt], name: "idx_mq_expires")
+  @@index([idempotencyKey], name: "idx_mq_idempotency")
+  @@map("message_queue")
+}
+
+model DeliveryToken {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  tokenHash       String    @unique @map("token_hash") @db.VarChar(64)
+  forSenderType   String    @map("for_sender_type") @db.VarChar(20)
+  forSenderValue  String    @map("for_sender_value") @db.VarChar(255)
+  maxPayloadBytes Int       @default(65536) @map("max_payload_bytes")
+  requirePow      Boolean   @default(false) @map("require_pow")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz
+  usedAt          DateTime? @map("used_at") @db.Timestamptz
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId], name: "idx_dt_user_id")
+  @@index([tokenHash], name: "idx_dt_token_hash")
+  @@index([expiresAt], name: "idx_dt_expires")
+  @@map("delivery_tokens")
+}
+
+model CallEvent {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId          String    @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  callId           String    @map("call_id") @db.Uuid
+  fromUserId       String    @map("from_user_id") @db.Uuid
+  fromDeviceId     String    @map("from_device_id") @db.Uuid
+  toUserId         String    @map("to_user_id") @db.Uuid
+  toDeviceId       String?   @map("to_device_id") @db.Uuid
+  eventType        String    @map("event_type") @db.VarChar(20)
+  encryptedPayload String    @map("encrypted_payload") @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  receivedAt       DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz
+  ackedAt          DateTime? @map("acked_at") @db.Timestamptz
+  fromUser         User      @relation("CallEventFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  fromDevice       Device    @relation("CallEventFromDevice", fields: [fromDeviceId], references: [id], onDelete: Cascade)
+  toUser           User      @relation("CallEventTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  toDevice         Device?   @relation("CallEventToDevice", fields: [toDeviceId], references: [id], onDelete: Cascade)
+  @@index([toUserId], name: "idx_ce_to_user")
+  @@index([callId], name: "idx_ce_call_id")
+  @@index([expiresAt], name: "idx_ce_expires")
+  @@map("call_events")
+}
+
+model PushToken {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  deviceId    String   @unique @map("device_id") @db.Uuid
+  provider    String   @db.VarChar(20)
+  token       String   @db.Text
+  endpoint    String?  @db.Text
+  appBundleId String?  @map("app_bundle_id") @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  @@index([deviceId], name: "idx_push_device_id")
+  @@map("push_tokens")
+}
+
+model FederationServer {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  handle          String    @unique @db.VarChar(255)
+  baseUrl         String    @map("base_url") @db.Text
+  preferredKeyId  String?   @map("preferred_key_id") @db.VarChar(50)
+  status          String    @default("unknown") @db.VarChar(20)
+  lastSeenAt      DateTime? @map("last_seen_at") @db.Timestamptz
+  lastError       String?   @map("last_error") @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  keys            FederationServerKey[]
+  @@index([handle], name: "idx_fed_handle")
+  @@map("federation_servers")
+}
+
+model FederationServerKey {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  serverId  String    @map("server_id") @db.Uuid
+  keyId     String    @map("key_id") @db.VarChar(50)
+  publicKey String    @map("public_key") @db.Text
+  status    String    @default("active") @db.VarChar(20)
+  notBefore DateTime? @map("not_before") @db.Timestamptz
+  notAfter  DateTime? @map("not_after") @db.Timestamptz
+  fetchedAt DateTime  @default(now()) @map("fetched_at") @db.Timestamptz
+  server    FederationServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  @@unique([serverId, keyId], name: "unique_server_key")
+  @@index([serverId], name: "idx_fsk_server_id")
+  @@map("federation_server_keys")
+}

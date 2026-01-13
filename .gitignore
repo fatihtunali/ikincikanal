@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+coverage/
+
+# Prisma
+generated/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+apps/api/tmpclaude-777b-cwd
+apps/api/tmpclaude-7940-cwd
+apps/api/tmpclaude-f3fa-cwd
+prisma/tmpclaude-0bed-cwd
+prisma/tmpclaude-0d12-cwd
+prisma/tmpclaude-2b20-cwd
+prisma/tmpclaude-3766-cwd
+prisma/tmpclaude-dd70-cwd
+apps/api/src/tmpclaude-923a-cwd
+tmpclaude-7c29-cwd
+tmpclaude-2468-cwd
+apps/tmpclaude-fe9e-cwd
