@@ -203,6 +203,79 @@ export class MessagesGateway
     client.emit('pong', { timestamp: new Date().toISOString() });
   }
 
+  // ==========================================================================
+  // Typing Indicators (Ephemeral - not persisted)
+  // ==========================================================================
+
+  @SubscribeMessage('typing_start')
+  handleTypingStart(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { toUserId: string; conversationId?: string },
+  ) {
+    if (!client.userId) return;
+
+    // Broadcast to recipient's devices
+    this.server.to(`user:${data.toUserId}`).emit('typing', {
+      fromUserId: client.userId,
+      conversationId: data.conversationId,
+      isTyping: true,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  @SubscribeMessage('typing_stop')
+  handleTypingStop(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { toUserId: string; conversationId?: string },
+  ) {
+    if (!client.userId) return;
+
+    this.server.to(`user:${data.toUserId}`).emit('typing', {
+      fromUserId: client.userId,
+      conversationId: data.conversationId,
+      isTyping: false,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // ==========================================================================
+  // Read Receipts (Ephemeral notification)
+  // ==========================================================================
+
+  @SubscribeMessage('read_receipt')
+  handleReadReceipt(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { toUserId: string; messageIds: string[] },
+  ) {
+    if (!client.userId) return;
+
+    // Notify sender that messages were read
+    this.server.to(`user:${data.toUserId}`).emit('read', {
+      fromUserId: client.userId,
+      messageIds: data.messageIds,
+      readAt: new Date().toISOString(),
+    });
+  }
+
+  // ==========================================================================
+  // Reactions (Ephemeral notification - actual storage via REST)
+  // ==========================================================================
+
+  notifyReaction(
+    toUserId: string,
+    reaction: {
+      messageId: string;
+      fromUserId: string;
+      emoji: string;
+      action: 'add' | 'remove';
+    },
+  ) {
+    this.server.to(`user:${toUserId}`).emit('reaction', {
+      ...reaction,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // Get online status
   isDeviceOnline(deviceId: string): boolean {
     return this.connectedClients.has(deviceId);

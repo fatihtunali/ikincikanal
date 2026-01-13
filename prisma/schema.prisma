@@ -208,6 +208,19 @@ model PushToken {
   @@map("push_tokens")
 }
 
+model MessageReaction {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId       String   @map("message_id") @db.Uuid
+  fromUserId      String   @map("from_user_id") @db.Uuid
+  toUserId        String   @map("to_user_id") @db.Uuid
+  encryptedEmoji  String   @map("encrypted_emoji") @db.Text // Encrypted emoji
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  @@unique([messageId, fromUserId], name: "unique_reaction_per_user")
+  @@index([messageId], name: "idx_reactions_message")
+  @@index([toUserId], name: "idx_reactions_to_user")
+  @@map("message_reactions")
+}
+
 model FederationServer {
   id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   handle          String    @unique @db.VarChar(255)

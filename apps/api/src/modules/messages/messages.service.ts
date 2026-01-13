@@ -21,6 +21,10 @@ import {
   DeliveryTokenResponseDto,
   SealedSendDto,
   EnvelopeType,
+  AddReactionDto,
+  RemoveReactionDto,
+  ReactionResponseDto,
+  GetReactionsResponseDto,
 } from './dto/messages.dto';
 
 @Injectable()
@@ -348,5 +352,123 @@ export class MessagesService {
 
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  // ==========================================================================
+  // Reactions
+  // ==========================================================================
+
+  async addReaction(
+    fromUserId: string,
+    dto: AddReactionDto,
+  ): Promise<ReactionResponseDto> {
+    // Check if reaction already exists
+    const existing = await this.prisma.messageReaction.findUnique({
+      where: {
+        unique_reaction_per_user: {
+          messageId: dto.messageId,
+          fromUserId,
+        },
+      },
+    });
+
+    if (existing) {
+      // Update existing reaction
+      const updated = await this.prisma.messageReaction.update({
+        where: { id: existing.id },
+        data: { encryptedEmoji: dto.encryptedEmoji },
+      });
+
+      // Notify original message sender
+      this.gateway.notifyReaction(dto.toUserId, {
+        messageId: dto.messageId,
+        fromUserId,
+        emoji: dto.encryptedEmoji,
+        action: 'add',
+      });
+
+      return {
+        id: updated.id,
+        messageId: updated.messageId,
+        fromUserId: updated.fromUserId,
+        encryptedEmoji: updated.encryptedEmoji,
+        createdAt: updated.createdAt,
+      };
+    }
+
+    // Create new reaction
+    const reaction = await this.prisma.messageReaction.create({
+      data: {
+        messageId: dto.messageId,
+        fromUserId,
+        toUserId: dto.toUserId,
+        encryptedEmoji: dto.encryptedEmoji,
+      },
+    });
+
+    // Notify original message sender via WebSocket
+    this.gateway.notifyReaction(dto.toUserId, {
+      messageId: dto.messageId,
+      fromUserId,
+      emoji: dto.encryptedEmoji,
+      action: 'add',
+    });
+
+    return {
+      id: reaction.id,
+      messageId: reaction.messageId,
+      fromUserId: reaction.fromUserId,
+      encryptedEmoji: reaction.encryptedEmoji,
+      createdAt: reaction.createdAt,
+    };
+  }
+
+  async removeReaction(
+    fromUserId: string,
+    dto: RemoveReactionDto,
+  ): Promise<{ removed: boolean }> {
+    const reaction = await this.prisma.messageReaction.findUnique({
+      where: {
+        unique_reaction_per_user: {
+          messageId: dto.messageId,
+          fromUserId,
+        },
+      },
+    });
+
+    if (!reaction) {
+      return { removed: false };
+    }
+
+    await this.prisma.messageReaction.delete({
+      where: { id: reaction.id },
+    });
+
+    // Notify original message sender via WebSocket
+    this.gateway.notifyReaction(dto.toUserId, {
+      messageId: dto.messageId,
+      fromUserId,
+      emoji: '',
+      action: 'remove',
+    });
+
+    return { removed: true };
+  }
+
+  async getReactions(messageId: string): Promise<GetReactionsResponseDto> {
+    const reactions = await this.prisma.messageReaction.findMany({
+      where: { messageId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return {
+      reactions: reactions.map((r) => ({
+        id: r.id,
+        messageId: r.messageId,
+        fromUserId: r.fromUserId,
+        encryptedEmoji: r.encryptedEmoji,
+        createdAt: r.createdAt,
+      })),
+    };
   }
 }

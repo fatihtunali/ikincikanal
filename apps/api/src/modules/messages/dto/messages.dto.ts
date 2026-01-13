@@ -150,3 +150,51 @@ export class SealedSendDto {
   @IsUUID()
   clientMessageId: string;
 }
+
+// ==========================================================================
+// Reactions
+// ==========================================================================
+
+/**
+ * Add reaction to a message
+ */
+export class AddReactionDto {
+  @IsUUID()
+  messageId: string;
+
+  @IsUUID()
+  toUserId: string; // Original message sender
+
+  @IsString()
+  @IsNotEmpty()
+  encryptedEmoji: string; // Encrypted emoji (client encrypts)
+}
+
+/**
+ * Remove reaction from a message
+ */
+export class RemoveReactionDto {
+  @IsUUID()
+  messageId: string;
+
+  @IsUUID()
+  toUserId: string;
+}
+
+/**
+ * Reaction response
+ */
+export class ReactionResponseDto {
+  id: string;
+  messageId: string;
+  fromUserId: string;
+  encryptedEmoji: string;
+  createdAt: Date;
+}
+
+/**
+ * Get reactions response
+ */
+export class GetReactionsResponseDto {
+  reactions: ReactionResponseDto[];
+}

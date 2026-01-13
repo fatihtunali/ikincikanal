@@ -2,7 +2,9 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Body,
+  Param,
   Query,
   UseGuards,
   Request,
@@ -17,6 +19,8 @@ import {
   AckMessagesDto,
   RequestDeliveryTokenDto,
   SealedSendDto,
+  AddReactionDto,
+  RemoveReactionDto,
 } from './dto/messages.dto';
 
 @Controller('messages')
@@ -96,5 +100,41 @@ export class MessagesController {
   @HttpCode(HttpStatus.CREATED)
   async sealedSend(@Body() dto: SealedSendDto, @Ip() ip: string) {
     return this.messagesService.sealedSend(dto, ip);
+  }
+
+  // ==========================================================================
+  // Reactions
+  // ==========================================================================
+
+  /**
+   * POST /messages/reactions
+   * Add or update a reaction to a message
+   */
+  @Post('reactions')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.CREATED)
+  async addReaction(@Request() req: any, @Body() dto: AddReactionDto) {
+    return this.messagesService.addReaction(req.user.sub, dto);
+  }
+
+  /**
+   * DELETE /messages/reactions
+   * Remove a reaction from a message
+   */
+  @Delete('reactions')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async removeReaction(@Request() req: any, @Body() dto: RemoveReactionDto) {
+    return this.messagesService.removeReaction(req.user.sub, dto);
+  }
+
+  /**
+   * GET /messages/:messageId/reactions
+   * Get all reactions for a message
+   */
+  @Get(':messageId/reactions')
+  @UseGuards(JwtAuthGuard)
+  async getReactions(@Param('messageId') messageId: string) {
+    return this.messagesService.getReactions(messageId);
   }
 }
