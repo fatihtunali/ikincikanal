@@ -53,6 +53,36 @@ export class PasskeyAttestationDto {
 }
 
 /**
+ * Signed pre-key for Signal Protocol
+ */
+export class SignedPreKeyDto {
+  @IsInt()
+  @Min(0)
+  keyId: number;
+
+  @IsString()
+  @IsNotEmpty()
+  publicKey: string; // Base64 X25519 public key
+
+  @IsString()
+  @IsNotEmpty()
+  signature: string; // Base64 Ed25519 signature
+}
+
+/**
+ * One-time pre-key for Signal Protocol
+ */
+export class OneTimePreKeyDto {
+  @IsInt()
+  @Min(0)
+  keyId: number;
+
+  @IsString()
+  @IsNotEmpty()
+  publicKey: string; // Base64 X25519 public key
+}
+
+/**
  * Device key material for Signal Protocol
  */
 export class NewDeviceKeysDto {
@@ -68,30 +98,6 @@ export class NewDeviceKeysDto {
   @ValidateNested({ each: true })
   @Type(() => OneTimePreKeyDto)
   oneTimePreKeys: OneTimePreKeyDto[];
-}
-
-export class SignedPreKeyDto {
-  @IsInt()
-  @Min(0)
-  keyId: number;
-
-  @IsString()
-  @IsNotEmpty()
-  publicKey: string; // Base64 X25519 public key
-
-  @IsString()
-  @IsNotEmpty()
-  signature: string; // Base64 Ed25519 signature
-}
-
-export class OneTimePreKeyDto {
-  @IsInt()
-  @Min(0)
-  keyId: number;
-
-  @IsString()
-  @IsNotEmpty()
-  publicKey: string; // Base64 X25519 public key
 }
 
 /**
