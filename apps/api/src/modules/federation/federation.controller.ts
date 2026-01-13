@@ -82,4 +82,24 @@ export class FederationController {
   async getKeysForUser(@Query('fullHandle') fullHandle: string) {
     return this.federationService.getKeysForUser(fullHandle);
   }
+
+  // ==========================================================================
+  // User Deletion Notice (S2S Outbound)
+  // ==========================================================================
+
+  /**
+   * POST /federation/user-deleted
+   * Notify federated servers that a user has been deleted
+   * This is called internally after account deletion
+   */
+  @Post('federation/user-deleted')
+  @UseGuards(JwtAuthGuard)
+  async notifyUserDeleted(
+    @Body() body: { fullHandle: string; targetServers?: string[] },
+  ) {
+    return this.federationService.broadcastUserDeleted(
+      body.fullHandle,
+      body.targetServers,
+    );
+  }
 }

@@ -391,6 +391,69 @@ export class FederationService {
   }
 
   // ==========================================================================
+  // Broadcast User Deleted
+  // ==========================================================================
+
+  async broadcastUserDeleted(
+    fullHandle: string,
+    targetServers?: string[],
+  ): Promise<{ notified: string[]; failed: string[] }> {
+    const notified: string[] = [];
+    const failed: string[] = [];
+
+    // Get list of federated servers to notify
+    let servers: { handle: string }[];
+
+    if (targetServers && targetServers.length > 0) {
+      servers = targetServers.map(h => ({ handle: h }));
+    } else {
+      // Notify all known active federated servers
+      servers = await this.prisma.federationServer.findMany({
+        where: {
+          status: 'active',
+          handle: { not: `@${this.homeServer}` }, // Don't notify ourselves
+        },
+        select: { handle: true },
+      });
+    }
+
+    const payload = {
+      fullHandle,
+      deletedAt: new Date().toISOString(),
+    };
+
+    // Send to each server
+    for (const server of servers) {
+      try {
+        const success = await this.sendToRemoteServer(
+          server.handle,
+          FederationPayloadType.USER_DELETED,
+          payload,
+        );
+
+        if (success) {
+          notified.push(server.handle);
+        } else {
+          failed.push(server.handle);
+        }
+      } catch (error) {
+        console.error(
+          `[Federation] Failed to notify ${server.handle} of user deletion:`,
+          error,
+        );
+        failed.push(server.handle);
+      }
+    }
+
+    console.log(
+      `[Federation] User deletion broadcast for ${fullHandle}: ` +
+      `${notified.length} notified, ${failed.length} failed`,
+    );
+
+    return { notified, failed };
+  }
+
+  // ==========================================================================
   // Helpers
   // ==========================================================================
 

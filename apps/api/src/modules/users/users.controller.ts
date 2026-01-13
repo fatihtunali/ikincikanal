@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   Ip,
+  Query,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -18,10 +19,15 @@ import {
   UpdateProfileDto,
   ChangePasswordDto,
 } from './dto/users.dto';
+import { PrivacyService } from '../privacy/privacy.service';
+import { NukeAccountDto, ExportFormat } from '../privacy/dto/privacy.dto';
 
 @Controller()
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly privacyService: PrivacyService,
+  ) {}
 
   /**
    * POST /users/resolve
@@ -83,5 +89,73 @@ export class UsersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async changePassword(@Request() req: any, @Body() dto: ChangePasswordDto) {
     await this.usersService.changePassword(req.user.sub, dto);
+  }
+
+  // ==========================================================================
+  // Account Nuke (POST /me/nuke)
+  // ==========================================================================
+
+  /**
+   * POST /me/nuke
+   * Initiate or execute account nuke (immediate deletion)
+   *
+   * Two modes:
+   * 1. Standard mode:
+   *    - First call: Returns nukeToken (valid 30 seconds)
+   *    - Second call: Pass nukeToken to confirm deletion
+   *
+   * 2. Instant mode:
+   *    - Pass instant=true with deviceKeySignature and timestamp
+   *    - Signature format: Ed25519 sign "NUKE:{userId}:{timestamp}"
+   */
+  @Post('me/nuke')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async nukeAccount(@Request() req: any, @Body() dto: NukeAccountDto) {
+    // If no token and not instant mode, initiate nuke (return token)
+    if (!dto.nukeToken && !dto.instant) {
+      return this.privacyService.initiateNuke(req.user.sub);
+    }
+
+    // Otherwise, execute nuke
+    return this.privacyService.executeNuke(
+      req.user.sub,
+      req.user.deviceId,
+      dto,
+    );
+  }
+
+  // ==========================================================================
+  // Data Export (GET /me/export)
+  // ==========================================================================
+
+  /**
+   * GET /me/export
+   * Request and get data export status
+   * Returns metadata and message stats (no plaintext content)
+   */
+  @Get('me/export')
+  @UseGuards(JwtAuthGuard)
+  async getExport(
+    @Request() req: any,
+    @Query('format') format?: ExportFormat,
+  ) {
+    // Request a new export if none exists, or return existing status
+    try {
+      return await this.privacyService.requestExport(req.user.sub, {
+        format: format || ExportFormat.JSON,
+      });
+    } catch (error: any) {
+      // If export already in progress, return that status
+      if (error?.status === 409) {
+        // Get pending export status
+        const pending = await this.privacyService.getExportStatus(
+          req.user.sub,
+          'pending',
+        ).catch(() => null);
+        if (pending) return pending;
+      }
+      throw error;
+    }
   }
 }

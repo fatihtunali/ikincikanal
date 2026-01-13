@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsBoolean } from 'class-validator';
 
 /**
  * Export format options
@@ -32,11 +32,43 @@ export class ExportStatusDto {
 }
 
 /**
- * Account deletion request
+ * Account deletion request (standard 7-day grace period)
  */
 export class DeleteAccountDto {
   @IsString()
   confirmation: string; // Must be "DELETE MY ACCOUNT"
+}
+
+/**
+ * Nuke account request - Two modes:
+ * 1. Standard: token + 30 second confirm window
+ * 2. Instant: deviceKeySignature for immediate deletion
+ */
+export class NukeAccountDto {
+  @IsBoolean()
+  @IsOptional()
+  instant?: boolean; // If true, use instant mode with deviceKeySignature
+
+  @IsString()
+  @IsOptional()
+  deviceKeySignature?: string; // Ed25519 signature over "NUKE:{userId}:{timestamp}"
+
+  @IsString()
+  @IsOptional()
+  nukeToken?: string; // Token from initiate step (for standard mode)
+
+  @IsString()
+  @IsOptional()
+  timestamp?: string; // ISO timestamp for signature verification
+}
+
+/**
+ * Nuke initiation response (standard mode)
+ */
+export class NukeInitiationDto {
+  nukeToken: string;
+  expiresAt: Date; // 30 seconds from now
+  confirmationRequired: true;
 }
 
 /**

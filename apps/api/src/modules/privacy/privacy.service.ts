@@ -14,7 +14,10 @@ import {
   DeleteAccountDto,
   DeletionStatusDto,
   ExportData,
+  NukeAccountDto,
+  NukeInitiationDto,
 } from './dto/privacy.dto';
+import { createVerify } from 'crypto';
 import { randomBytes } from 'crypto';
 
 @Injectable()
@@ -431,6 +434,162 @@ export class PrivacyService {
 
     // In production, notify federated servers about deletion
     // await this.federationService.broadcastUserDeleted(user.fullHandle);
+  }
+
+  // ==========================================================================
+  // Nuke Account (Immediate Deletion - 2 modes)
+  // ==========================================================================
+
+  /**
+   * Initiate nuke (standard mode) - returns a token valid for 30 seconds
+   */
+  async initiateNuke(userId: string): Promise<NukeInitiationDto> {
+    // Check if there's already a pending nuke
+    const existingNuke = await this.redis.get(`nuke:pending:${userId}`);
+    if (existingNuke) {
+      const data = JSON.parse(existingNuke);
+      const expiresAt = new Date(data.expiresAt);
+      if (expiresAt > new Date()) {
+        return {
+          nukeToken: data.token,
+          expiresAt,
+          confirmationRequired: true,
+        };
+      }
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 30 * 1000); // 30 seconds
+
+    await this.redis.setex(
+      `nuke:pending:${userId}`,
+      30, // 30 second TTL
+      JSON.stringify({
+        token,
+        userId,
+        expiresAt: expiresAt.toISOString(),
+      }),
+    );
+
+    return {
+      nukeToken: token,
+      expiresAt,
+      confirmationRequired: true,
+    };
+  }
+
+  /**
+   * Execute nuke - Two modes:
+   * 1. Standard: Verify nukeToken within 30s window
+   * 2. Instant: Verify deviceKeySignature for immediate deletion
+   */
+  async executeNuke(
+    userId: string,
+    deviceId: string,
+    dto: NukeAccountDto,
+  ): Promise<{ deleted: boolean; fullHandle: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { fullHandle: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (dto.instant && dto.deviceKeySignature && dto.timestamp) {
+      // Instant mode: Verify device key signature
+      await this.verifyNukeSignature(userId, deviceId, dto);
+    } else if (dto.nukeToken) {
+      // Standard mode: Verify nuke token
+      await this.verifyNukeToken(userId, dto.nukeToken);
+    } else {
+      throw new BadRequestException(
+        'Must provide either nukeToken (standard mode) or deviceKeySignature+timestamp (instant mode)',
+      );
+    }
+
+    // Execute immediate deletion
+    await this.executeAccountDeletion(userId);
+
+    // Clean up nuke pending token
+    await this.redis.del(`nuke:pending:${userId}`);
+
+    return {
+      deleted: true,
+      fullHandle: user.fullHandle,
+    };
+  }
+
+  private async verifyNukeToken(userId: string, token: string): Promise<void> {
+    const pending = await this.redis.get(`nuke:pending:${userId}`);
+
+    if (!pending) {
+      throw new BadRequestException(
+        'No pending nuke request. Please initiate first with POST /me/nuke',
+      );
+    }
+
+    const data = JSON.parse(pending);
+
+    if (data.token !== token) {
+      throw new BadRequestException('Invalid nuke token');
+    }
+
+    const expiresAt = new Date(data.expiresAt);
+    if (expiresAt <= new Date()) {
+      throw new BadRequestException(
+        'Nuke token expired. Please initiate again.',
+      );
+    }
+  }
+
+  private async verifyNukeSignature(
+    userId: string,
+    deviceId: string,
+    dto: NukeAccountDto,
+  ): Promise<void> {
+    // Get device's identity key
+    const device = await this.prisma.device.findUnique({
+      where: { id: deviceId },
+      select: { identityKeyPub: true, userId: true },
+    });
+
+    if (!device || device.userId !== userId) {
+      throw new BadRequestException('Device not found or not owned by user');
+    }
+
+    // Verify timestamp is within 5 minutes
+    const timestamp = new Date(dto.timestamp!);
+    const now = new Date();
+    const skew = 5 * 60 * 1000; // 5 minutes
+
+    if (Math.abs(now.getTime() - timestamp.getTime()) > skew) {
+      throw new BadRequestException('Timestamp outside acceptable range');
+    }
+
+    // Build message to verify: "NUKE:{userId}:{timestamp}"
+    const message = `NUKE:${userId}:${dto.timestamp}`;
+
+    // Verify Ed25519 signature
+    try {
+      const verify = createVerify('Ed25519');
+      verify.update(message);
+
+      const isValid = verify.verify(
+        Buffer.from(device.identityKeyPub, 'base64'),
+        Buffer.from(dto.deviceKeySignature!, 'base64'),
+      );
+
+      if (!isValid) {
+        throw new BadRequestException('Invalid device key signature');
+      }
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Signature verification failed');
+    }
   }
 
   // ==========================================================================

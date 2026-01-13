@@ -1,5 +1,13 @@
-IKINCI KANAL – Yol Haritası (Production’a giden net rota)
-Faz 0 — Proje Temeli (1–2 gün)
+IKINCI KANAL – Yol Haritası (Production'a giden net rota)
+
+## Durum Özeti
+- **Faz 0-7**: ✅ TAMAMLANDI (MVP Complete!)
+- **Faz 8**: ⏳ Post-MVP (WebSocket, Groups, Rich Features)
+- **API**: https://api.itinerarytemplate.com/
+
+---
+
+Faz 0 — Proje Temeli ✅ TAMAMLANDI
 
 Amaç: Kod yazmadan önce zemini sabitlemek (sonradan acı çektirmesin).
 
@@ -23,7 +31,7 @@ Migrations: Prisma / TypeORM (hangisi hızlıysan)
 
 Rate limit: Redis-based
 
-Faz 1 — Identity + Auth (Sprint 1)
+Faz 1 — Identity + Auth ✅ TAMAMLANDI
 
 Amaç: Hesap açma ve giriş “tam güvenli akışla” çalışsın.
 
@@ -86,7 +94,7 @@ Rate limit ✅
 
 Audit-friendly logs ✅
 
-Faz 2 — Devices + Keys (Sprint 2)
+Faz 2 — Devices + Keys ✅ TAMAMLANDI
 
 Amaç: Signal key materyali sunucuya doğru yüklenip doğru servis edilsin.
 
@@ -126,7 +134,7 @@ one-time prekeys doğru azalıyor ✅
 
 revoked device key verilmiyor ✅
 
-Faz 3 — Messaging Core (Sprint 3)
+Faz 3 — Messaging Core ✅ TAMAMLANDI
 
 Amaç: Store-and-forward E2EE mesajlaşma uçtan uca çalışsın.
 
@@ -180,7 +188,7 @@ ack sonrası server’da silin ✅
 
 TTL sonrası otomatik silin ✅
 
-Faz 4 — Sealed Sender (Sprint 4)
+Faz 4 — Sealed Sender ✅ TAMAMLANDI
 
 Amaç: Sunucunun “kim gönderdi” bilgisini bilmediği mod üretimde çalışsın.
 
@@ -222,7 +230,7 @@ Token tek kullanım ✅
 
 Spam denemesi rate limit’e takılır ✅
 
-Faz 5 — Calls (Sprint 5)
+Faz 5 — Calls ✅ TAMAMLANDI
 
 Amaç: WebRTC arama gizlilik odaklı şekilde çalışsın.
 
@@ -252,7 +260,7 @@ relay policy default: relay ✅
 
 call events TTL (5 dk) ✅
 
-Faz 6 — Federation MVP (Sprint 6)
+Faz 6 — Federation MVP ✅ TAMAMLANDI
 
 Amaç: Server-to-server mesaj teslimi (minimum viable federation).
 
@@ -288,7 +296,7 @@ Replay aynı nonce ile reddedilir ✅
 
 Key rotation id’si ile çalışır ✅
 
-Faz 7 — Privacy & Operations (Sprint 7)
+Faz 7 — Privacy & Operations ✅ TAMAMLANDI
 
 Amaç: “Gerçek güvenlik ürünü”ne dönüş.
 
@@ -322,7 +330,7 @@ Auth token signing key rotate
 
 Emergency procedures
 
-Faz 8 — Polish (Post-MVP)
+Faz 8 — Polish ⏳ POST-MVP (Beklemede)
 
 Amaç: MVP sonrası iyileştirmeler ve genişletmeler.
 
