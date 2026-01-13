@@ -15,6 +15,23 @@ import {
 import { Type } from 'class-transformer';
 
 /**
+ * Attestation response from WebAuthn
+ */
+export class AttestationResponseDto {
+  @IsString()
+  @IsNotEmpty()
+  clientDataJSON: string;
+
+  @IsString()
+  @IsNotEmpty()
+  attestationObject: string;
+
+  @IsArray()
+  @IsOptional()
+  transports?: string[];
+}
+
+/**
  * Passkey attestation from WebAuthn registration
  */
 export class PasskeyAttestationDto {
@@ -33,20 +50,6 @@ export class PasskeyAttestationDto {
   @ValidateNested()
   @Type(() => AttestationResponseDto)
   response: AttestationResponseDto;
-}
-
-export class AttestationResponseDto {
-  @IsString()
-  @IsNotEmpty()
-  clientDataJSON: string;
-
-  @IsString()
-  @IsNotEmpty()
-  attestationObject: string;
-
-  @IsArray()
-  @IsOptional()
-  transports?: string[];
 }
 
 /**
