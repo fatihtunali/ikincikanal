@@ -18,6 +18,13 @@ export class RedisService implements OnModuleDestroy {
     await this.subscriber.quit();
   }
 
+  /**
+   * Health check ping
+   */
+  async ping(): Promise<string> {
+    return this.client.ping();
+  }
+
   // ==========================================================================
   // Rate Limiting
   // ==========================================================================
