@@ -3,11 +3,14 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { MessagesGateway } from './messages.gateway';
 import {
   SendMessageDto,
   SendMessageResponseDto,
@@ -29,6 +32,8 @@ export class MessagesService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly config: ConfigService,
+    @Inject(forwardRef(() => MessagesGateway))
+    private readonly gateway: MessagesGateway,
   ) {}
 
   // ==========================================================================
@@ -107,8 +112,16 @@ export class MessagesService {
           sentAt: message.sentAt,
         });
 
-        // Notify recipient device via pubsub
+        // Notify recipient device via pubsub (for long-polling)
         await this.redis.publishMessageArrival(dest.deviceId);
+
+        // Notify via WebSocket (real-time)
+        this.gateway.notifyNewMessage(dto.toUserId, dest.deviceId, {
+          serverMessageId: message.serverMessageId,
+          fromUserId,
+          envelopeType: dto.envelopeType,
+          sentAt: message.sentAt,
+        });
       }
     });
 
