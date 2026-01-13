@@ -49,3 +49,7 @@ apps/tmpclaude-fe9e-cwd
 tmpclaude-8ad5-cwd
 tmpclaude-8bc4-cwd
 tmpclaude-21cf-cwd
+.claude/NOTES.md
+
+# Claude notes (contains secrets)
+.claude/
