@@ -1,0 +1,39 @@
+name: ikinci_core
+description: Shared core library for IKINCI KANAL - Secure Decentralized Messaging
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  # Network
+  dio: ^5.7.0
+  socket_io_client: ^3.0.2
+
+  # Cryptography (Signal Protocol)
+  cryptography: ^2.7.0
+  x25519: ^0.1.1
+
+  # Storage (abstract interface, platform implementations separate)
+  flutter_secure_storage: ^9.2.2
+  hive: ^2.2.3
+
+  # State Management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # Utils
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+  uuid: ^4.5.1
+  logger: ^2.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.13
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+  riverpod_generator: ^2.6.2

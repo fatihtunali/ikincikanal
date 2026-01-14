@@ -18,6 +18,7 @@ import { PushModule } from './modules/push/push.module';
 import { FederationModule } from './modules/federation/federation.module';
 import { PrivacyModule } from './modules/privacy/privacy.module';
 import { HealthModule } from './modules/health/health.module';
+import { GroupsModule } from './modules/groups/groups.module';
 
 // Controllers & Services
 import { AppController } from './app.controller';
@@ -65,6 +66,7 @@ import { AppService } from './app.service';
     FederationModule,
     PrivacyModule,
     HealthModule,
+    GroupsModule,
   ],
   controllers: [AppController],
   providers: [

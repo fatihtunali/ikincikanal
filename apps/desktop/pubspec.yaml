@@ -1,0 +1,65 @@
+name: ikinci_kanal_desktop
+description: "IKINCI KANAL - Secure Decentralized Messaging (Desktop)"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Shared Core Package
+  ikinci_core:
+    path: ../../packages/ikinci_core
+
+  # UI
+  cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.0
+
+  # State Management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # Navigation
+  go_router: ^14.6.2
+
+  # Network (from ikinci_core, but needed for types)
+  dio: ^5.7.0
+  socket_io_client: ^3.0.2
+
+  # Local Storage
+  flutter_secure_storage: ^9.2.2
+  hive_flutter: ^1.1.0
+
+  # Cryptography
+  cryptography: ^2.7.0
+  x25519: ^0.1.1
+
+  # Desktop-specific
+  window_manager: ^0.3.7
+  # system_tray: ^2.0.3  # Temporarily disabled due to uuid conflict
+  # local_notifier: ^0.1.6
+
+  # Utils
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+  uuid: ^4.5.1
+  logger: ^2.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.13
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+  riverpod_generator: ^2.6.2
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icons/

@@ -2,8 +2,20 @@ IKINCI KANAL – Yol Haritası (Production'a giden net rota)
 
 ## Durum Özeti
 - **Faz 0-7**: ✅ TAMAMLANDI (MVP Complete!)
-- **Faz 8**: ⏳ Post-MVP (WebSocket, Groups, Rich Features)
+- **Faz 8.1**: ✅ TAMAMLANDI (WebSocket Real-time Delivery)
+- **Faz 8.3**: ✅ TAMAMLANDI (Rich Features - Typing, Read Receipts, Reactions)
+- **Faz 8.2**: 🚧 DEVAM EDİYOR (Group Messaging - MLS Backend Ready)
+- **Faz 8.4**: 🚧 DEVAM EDİYOR (Platform Expansion - Desktop App Structure Ready)
 - **API**: https://api.itinerarytemplate.com/
+
+### Son Gelişmeler (2026-01-14)
+- ✅ MLS (RFC 9420) database tabloları eklendi (5 tablo)
+- ✅ Groups API modülü oluşturuldu (CRUD, member management, messaging)
+- ✅ Flutter Desktop app yapısı oluşturuldu (apps/desktop/)
+- ✅ Shared core package oluşturuldu (packages/ikinci_core/)
+- ✅ CLI client yapısı oluşturuldu (apps/cli/)
+- ⏳ MLS client-side integration (OpenMLS FFI) beklemede
+- ⏳ Prisma migration (DATABASE_URL yapılandırması gerekli)
 
 ---
 
@@ -330,49 +342,91 @@ Auth token signing key rotate
 
 Emergency procedures
 
-Faz 8 — Polish ⏳ POST-MVP (Beklemede)
+Faz 8 — Polish (Kısmen Tamamlandı)
 
 Amaç: MVP sonrası iyileştirmeler ve genişletmeler.
 
-8.1 Real-time Delivery
+8.1 Real-time Delivery ✅ TAMAMLANDI
 
-WebSocket connection (long-poll yerine)
+WebSocket connection (long-poll yerine) ✅
 
-Connection multiplexing
+Connection multiplexing ✅
 
-Heartbeat / reconnection logic
+Heartbeat / reconnection logic ✅
 
-8.2 Group Messaging
+JWT authentication on connect ✅
 
-MLS (Messaging Layer Security) veya Signal Group Protocol
+Multi-device tracking ✅
 
-Group key management
+**Implementasyon:**
+- Backend: `apps/api/src/modules/messages/messages.gateway.ts` (Socket.IO)
+- Mobile: `apps/mobile/lib/core/api/websocket_service.dart`
 
-Member add/remove with forward secrecy
+8.2 Group Messaging 🚧 DEVAM EDİYOR
 
-8.3 Rich Features
+MLS (RFC 9420) protocol seçildi ✅
 
-Message reactions (encrypted)
+**Backend (Tamamlandı):**
+- Database tabloları: `mls_groups`, `mls_group_members`, `mls_key_packages`, `mls_group_messages`, `mls_group_message_deliveries` ✅
+- Groups API module: `apps/api/src/modules/groups/` ✅
+- Endpoints: `/groups`, `/groups/key-packages`, `/groups/:id/members`, `/groups/:id/messages` ✅
 
-Typing indicators (ephemeral, no persistence)
+**Client-side (Beklemede):**
+- OpenMLS via FFI integration ⏳
+- MLS group state management ⏳
+- Key package generation/upload ⏳
 
-Read receipts (opt-in)
+8.3 Rich Features ✅ TAMAMLANDI
 
-Link previews (client-side only, no server fetch)
+Message reactions (encrypted) ✅
 
-8.4 Platform Expansion
+Typing indicators (ephemeral, no persistence) ✅
 
-Desktop app (Electron/Tauri)
+Read receipts (opt-in) ✅
 
-CLI client (developer/power user)
+Link previews (client-side only, no server fetch) — not implemented
+
+**Implementasyon:**
+- Backend: `typing_start`, `typing_stop`, `read_receipt` WebSocket handlers
+- Mobile: `sendTypingStart()`, `sendTypingStop()`, `sendReadReceipt()` methods
+- Reactions: `notifyReaction()` backend, `ReactionEvent` mobile model
+
+8.4 Platform Expansion 🚧 DEVAM EDİYOR
+
+**Flutter Desktop App (Tamamlandı):**
+- App structure: `apps/desktop/` ✅
+- Window management (window_manager) ✅
+- Custom titlebar with navigation ✅
+- Dark/Light theme support ✅
+- Shared core package integration ✅
+
+**Shared Core Package (Tamamlandı):**
+- Package: `packages/ikinci_core/` ✅
+- API services, models, crypto modules ✅
+- Platform-agnostic secure storage interface ✅
+
+**CLI Client (Yapısı Tamamlandı):**
+- App structure: `apps/cli/` ✅
+- Command framework (args package) ✅
+- Commands: auth, chat, contacts, devices, groups, status ✅
+- Credentials storage (~/.ikinci/) ✅
+- Colored terminal output ✅
+- ikinci_core integration ⏳
+- Real-time WebSocket watching ⏳
 
 DoD
 
 WebSocket stabil ve güvenli ✅
 
-Grup mesajlaşma E2EE ✅
+Typing indicators çalışıyor ✅
 
-Mobile + Desktop + Web tam uyum ✅
+Read receipts çalışıyor ✅
+
+Reactions infrastructure hazır ✅
+
+Grup mesajlaşma E2EE ⏳
+
+Mobile + Desktop + Web tam uyum ⏳
 
 Kabul Kriterleri (Production Gate)
 

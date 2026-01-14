@@ -7,7 +7,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -249,4 +248,90 @@ model FederationServerKey {
   @@unique([serverId, keyId], name: "unique_server_key")
   @@index([serverId], name: "idx_fsk_server_id")
   @@map("federation_server_keys")
+}
+
+// =============================================================================
+// MLS Group Messaging (RFC 9420)
+// =============================================================================
+
+model MlsGroup {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId       String    @unique @map("group_id") @db.VarChar(64) // MLS group_id (Base64)
+  name          String?   @db.VarChar(128) // Encrypted group name
+  creatorUserId String    @map("creator_user_id") @db.Uuid
+  epoch         BigInt    @default(0) // Current MLS epoch
+  cipherSuite   Int       @default(1) @map("cipher_suite") // MLS cipher suite ID
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  members       MlsGroupMember[]
+  messages      MlsGroupMessage[]
+
+  @@index([groupId], name: "idx_mls_group_id")
+  @@map("mls_groups")
+}
+
+model MlsGroupMember {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId       String    @map("group_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  deviceId      String    @map("device_id") @db.Uuid
+  leafNodeIndex Int       @map("leaf_node_index") // MLS tree position
+  role          String    @default("member") @db.VarChar(20) // admin, member
+  joinedAt      DateTime  @default(now()) @map("joined_at") @db.Timestamptz
+  removedAt     DateTime? @map("removed_at") @db.Timestamptz
+
+  group         MlsGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId, deviceId], name: "unique_group_member_device")
+  @@index([groupId], name: "idx_member_group")
+  @@index([userId], name: "idx_member_user")
+  @@map("mls_group_members")
+}
+
+model MlsKeyPackage {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  deviceId        String    @map("device_id") @db.Uuid
+  keyPackage      String    @map("key_package") @db.Text // Serialized MLS KeyPackage
+  keyPackageRef   String    @unique @map("key_package_ref") @db.VarChar(64) // Hash reference
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  consumedAt      DateTime? @map("consumed_at") @db.Timestamptz
+  consumedByGroup String?   @map("consumed_by_group") @db.Uuid
+
+  @@index([userId, deviceId], name: "idx_kp_user_device")
+  @@index([keyPackageRef], name: "idx_kp_ref")
+  @@map("mls_key_packages")
+}
+
+model MlsGroupMessage {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  serverMessageId String    @unique @default(dbgenerated("gen_random_uuid()")) @map("server_message_id") @db.Uuid
+  groupId         String    @map("group_id") @db.Uuid
+  epoch           BigInt    // Message epoch for ordering
+  senderUserId    String?   @map("sender_user_id") @db.Uuid
+  senderDeviceId  String?   @map("sender_device_id") @db.Uuid
+  contentType     String    @map("content_type") @db.VarChar(30) // application, proposal, commit, welcome
+  ciphertext      String    @db.Text // MLS encrypted content
+  sentAt          DateTime  @map("sent_at") @db.Timestamptz
+  receivedAt      DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz
+
+  group           MlsGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId], name: "idx_gm_group")
+  @@index([expiresAt], name: "idx_gm_expires")
+  @@map("mls_group_messages")
+}
+
+model MlsGroupMessageDelivery {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId   String    @map("message_id") @db.Uuid
+  toUserId    String    @map("to_user_id") @db.Uuid
+  toDeviceId  String    @map("to_device_id") @db.Uuid
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz
+
+  @@unique([messageId, toDeviceId], name: "unique_message_device_delivery")
+  @@index([toUserId, toDeviceId], name: "idx_gmd_recipient")
+  @@map("mls_group_message_deliveries")
 }

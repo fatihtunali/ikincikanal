@@ -1,0 +1,10 @@
+include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    - prefer_single_quotes
+    - sort_constructors_first
+    - unnecessary_brace_in_string_interps
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - avoid_print

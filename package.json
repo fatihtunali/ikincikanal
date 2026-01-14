@@ -21,5 +21,9 @@
     "node": ">=20.0.0"
   },
   "author": "",
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "dotenv": "^17.2.3",
+    "prisma": "^7.2.0"
+  }
 }
