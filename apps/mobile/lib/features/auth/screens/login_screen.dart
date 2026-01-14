@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:passkeys/passkeys.dart';
+import 'package:passkeys/authenticator.dart';
+import 'package:passkeys/types.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../core/api/api_providers.dart';
 import '../../../core/storage/secure_storage.dart';
 import '../../../core/crypto/identity_keys.dart';
 import '../../../core/device/device_info_service.dart';
+import '../../../core/models/auth/passkey_attestation.dart';
+import '../../../core/models/device/device.dart';
+import '../../../core/models/keys/prekey.dart';
 import '../providers/auth_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -69,19 +73,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // Step 1: Get passkey login options from server
       final options = await authService.getPasskeyLoginOptions(handle);
 
-      // Step 2: Trigger native passkey UI
-      final passkeysPlugin = PasskeysApi();
-      final assertion = await passkeysPlugin.authenticate(
+      // Step 2: Trigger native passkey UI using PasskeyAuthenticator
+      final authenticator = PasskeyAuthenticator();
+      final authenticateResponse = await authenticator.authenticate(
         AuthenticateRequestType(
           relyingPartyId: options.rpId,
           challenge: options.challenge,
           timeout: options.timeout,
           userVerification: options.userVerification,
+          mediation: MediationType.Optional,
+          preferImmediatelyAvailableCredentials: true,
           allowCredentials: options.allowCredentials
-              .map((c) => AllowCredentialType(
+              .map((c) => CredentialType(
                     type: c.type,
                     id: c.id,
-                    transports: c.transports,
+                    transports: c.transports ?? [],
                   ))
               .toList(),
         ),
@@ -91,8 +97,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       String? identityKeyPub = await storage.getIdentityPublicKey();
       int? registrationId = await storage.getRegistrationId();
 
-      Map<String, dynamic>? deviceData;
-      Map<String, dynamic>? keysData;
+      DeviceBootstrap? deviceBootstrap;
+      InitialKeys? initialKeys;
 
       if (identityKeyPub == null || registrationId == null) {
         // Generate new device keys
@@ -108,11 +114,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
         final deviceName = await deviceInfo.getDeviceName();
 
-        deviceData = {
-          'deviceName': deviceName,
-          'identityKeyPub': identityKeyPub,
-          'registrationId': registrationId,
-        };
+        deviceBootstrap = DeviceBootstrap(
+          deviceName: deviceName,
+          identityKeyPub: identityKeyPub,
+          registrationId: registrationId,
+        );
 
         // Generate initial keys
         final identityPrivateKey = await storage.getIdentityPrivateKey();
@@ -122,43 +128,38 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             keyId: 1,
           );
 
-          keysData = {
-            'signedPreKey': {
-              'keyId': signedPrekey['keyId'],
-              'publicKey': signedPrekey['publicKey'],
-              'signature': signedPrekey['signature'],
-            },
-          };
+          initialKeys = InitialKeys(
+            signedPreKey: SignedPreKey(
+              keyId: signedPrekey['keyId'] as int,
+              publicKey: signedPrekey['publicKey'] as String,
+              signature: signedPrekey['signature'] as String,
+            ),
+            oneTimePreKeys: [],
+          );
         }
       }
 
-      // Step 4: Verify with server
+      // Step 4: Convert authenticator response to our PasskeyAssertion model
+      final assertion = PasskeyAssertion(
+        id: authenticateResponse.id,
+        rawId: authenticateResponse.rawId,
+        type: 'public-key',
+        response: PasskeyAssertionResponse(
+          clientDataJSON: authenticateResponse.clientDataJSON,
+          authenticatorData: authenticateResponse.authenticatorData,
+          signature: authenticateResponse.signature,
+          userHandle: authenticateResponse.userHandle.isNotEmpty
+              ? authenticateResponse.userHandle
+              : null,
+        ),
+      );
+
+      // Step 5: Verify with server
       final response = await authService.verifyPasskeyLogin(
         handle: handle,
-        assertion: PasskeyAssertion(
-          id: assertion.id,
-          rawId: assertion.rawId,
-          clientDataJSON: assertion.clientDataJSON,
-          authenticatorData: assertion.authenticatorData,
-          signature: assertion.signature,
-          userHandle: assertion.userHandle,
-        ),
-        device: deviceData != null
-            ? DeviceBootstrap(
-                deviceName: deviceData['deviceName'],
-                identityKeyPub: deviceData['identityKeyPub'],
-                registrationId: deviceData['registrationId'],
-              )
-            : null,
-        deviceKeys: keysData != null
-            ? InitialKeys(
-                signedPreKey: SignedPreKeyData(
-                  keyId: keysData['signedPreKey']['keyId'],
-                  publicKey: keysData['signedPreKey']['publicKey'],
-                  signature: keysData['signedPreKey']['signature'],
-                ),
-              )
-            : null,
+        assertion: assertion,
+        device: deviceBootstrap,
+        deviceKeys: initialKeys,
       );
 
       // Save tokens
@@ -168,8 +169,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       );
 
       await storage.saveUserInfo(
-        userId: response.userId,
-        deviceId: response.deviceId,
+        userId: response.user.id,
+        deviceId: response.device.id,
         handle: handle,
       );
 
@@ -179,10 +180,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } catch (e) {
       if (mounted) {
         String errorMessage = 'Passkey login failed';
-        if (e.toString().contains('cancelled')) {
+        if (e.toString().contains('cancelled') ||
+            e.toString().contains('Cancelled')) {
           errorMessage = 'Passkey authentication was cancelled';
-        } else if (e.toString().contains('not supported')) {
+        } else if (e.toString().contains('not supported') ||
+            e.toString().contains('NotSupported')) {
           errorMessage = 'Passkeys are not supported on this device';
+        } else if (e.toString().contains('NoCredentials')) {
+          errorMessage = 'No passkeys found for this account';
         }
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -203,10 +208,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
-    final isLoading = authState.status == AuthStatus.loading || _isPasskeyLoading;
+    final isLoading =
+        authState.status == AuthStatus.loading || _isPasskeyLoading;
 
     ref.listen<AuthState>(authProvider, (previous, next) {
-      if (next.errorMessage != null && previous?.errorMessage != next.errorMessage) {
+      if (next.errorMessage != null &&
+          previous?.errorMessage != next.errorMessage) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(next.errorMessage!),
@@ -295,7 +302,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   // Divider with "or"
                   Row(
                     children: [
-                      Expanded(child: Divider(color: AppColors.textSecondary.withOpacity(0.3))),
+                      Expanded(
+                          child: Divider(
+                              color: AppColors.textSecondary.withAlpha(77))),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Text(
@@ -303,7 +312,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: TextStyle(color: AppColors.textSecondary),
                         ),
                       ),
-                      Expanded(child: Divider(color: AppColors.textSecondary.withOpacity(0.3))),
+                      Expanded(
+                          child: Divider(
+                              color: AppColors.textSecondary.withAlpha(77))),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -330,7 +341,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 : Icons.visibility,
                           ),
                           onPressed: () {
-                            setState(() => _obscurePassword = !_obscurePassword);
+                            setState(
+                                () => _obscurePassword = !_obscurePassword);
                           },
                         ),
                       ),
@@ -339,7 +351,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       enabled: !isLoading,
                       onFieldSubmitted: (_) => _loginWithPassword(),
                       validator: (value) {
-                        if (_showPasswordField && (value == null || value.isEmpty)) {
+                        if (_showPasswordField &&
+                            (value == null || value.isEmpty)) {
                           return 'Please enter your password';
                         }
                         return null;
@@ -373,7 +386,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       TextButton(
-                        onPressed: isLoading ? null : () => context.go('/auth/register'),
+                        onPressed:
+                            isLoading ? null : () => context.go('/auth/register'),
                         child: const Text('Sign Up'),
                       ),
                     ],
