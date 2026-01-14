@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../shared/theme/app_theme.dart';
+import '../providers/auth_provider.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -15,7 +16,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _handleController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
@@ -30,29 +30,37 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+    // Clear any previous errors
+    ref.read(authProvider.notifier).clearError();
 
-    try {
-      // TODO: Implement registration logic
-      await Future.delayed(const Duration(seconds: 1));
-      if (mounted) {
-        context.go('/chats');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Registration failed: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+    final success = await ref.read(authProvider.notifier).register(
+      handle: _handleController.text.trim(),
+      password: _passwordController.text,
+    );
+
+    if (success && mounted) {
+      context.go('/chats');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider);
+    final isLoading = authState.status == AuthStatus.loading;
+
+    // Listen for errors and show snackbar
+    ref.listen<AuthState>(authProvider, (previous, next) {
+      if (next.errorMessage != null && previous?.errorMessage != next.errorMessage) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.errorMessage!),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    });
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -97,6 +105,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     ),
                     keyboardType: TextInputType.text,
                     textInputAction: TextInputAction.next,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    enabled: !isLoading,
                     validator: (value) {
                       if (value == null || value.isEmpty) {
                         return 'Please enter a handle';
@@ -104,8 +115,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       if (value.length < 3) {
                         return 'Handle must be at least 3 characters';
                       }
+                      if (value.length > 32) {
+                        return 'Handle must be at most 32 characters';
+                      }
                       if (!RegExp(r'^[a-z0-9._]+$').hasMatch(value)) {
                         return 'Only lowercase letters, numbers, dots and underscores';
+                      }
+                      if (value.startsWith('.') || value.endsWith('.')) {
+                        return 'Handle cannot start or end with a dot';
                       }
                       return null;
                     },
@@ -131,6 +148,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     ),
                     obscureText: _obscurePassword,
                     textInputAction: TextInputAction.next,
+                    enabled: !isLoading,
                     validator: (value) {
                       if (value == null || value.isEmpty) {
                         return 'Please enter a password';
@@ -163,6 +181,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     ),
                     obscureText: _obscureConfirmPassword,
                     textInputAction: TextInputAction.done,
+                    enabled: !isLoading,
                     onFieldSubmitted: (_) => _register(),
                     validator: (value) {
                       if (value != _passwordController.text) {
@@ -177,8 +196,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   SizedBox(
                     height: 52,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : _register,
-                      child: _isLoading
+                      onPressed: isLoading ? null : _register,
+                      child: isLoading
                           ? const SizedBox(
                               width: 24,
                               height: 24,
@@ -201,7 +220,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       TextButton(
-                        onPressed: () => context.go('/auth/login'),
+                        onPressed: isLoading ? null : () => context.go('/auth/login'),
                         child: const Text('Sign In'),
                       ),
                     ],

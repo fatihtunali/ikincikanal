@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../shared/theme/app_theme.dart';
+import '../providers/auth_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -14,7 +15,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _handleController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _isLoading = false;
   bool _obscurePassword = true;
 
   @override
@@ -27,29 +27,37 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+    // Clear any previous errors
+    ref.read(authProvider.notifier).clearError();
 
-    try {
-      // TODO: Implement login logic
-      await Future.delayed(const Duration(seconds: 1));
-      if (mounted) {
-        context.go('/chats');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+    final success = await ref.read(authProvider.notifier).login(
+      handle: _handleController.text.trim(),
+      password: _passwordController.text,
+    );
+
+    if (success && mounted) {
+      context.go('/chats');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider);
+    final isLoading = authState.status == AuthStatus.loading;
+
+    // Listen for errors and show snackbar
+    ref.listen<AuthState>(authProvider, (previous, next) {
+      if (next.errorMessage != null && previous?.errorMessage != next.errorMessage) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.errorMessage!),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    });
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -93,6 +101,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                     keyboardType: TextInputType.text,
                     textInputAction: TextInputAction.next,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    enabled: !isLoading,
                     validator: (value) {
                       if (value == null || value.isEmpty) {
                         return 'Please enter your handle';
@@ -121,6 +132,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                     obscureText: _obscurePassword,
                     textInputAction: TextInputAction.done,
+                    enabled: !isLoading,
                     onFieldSubmitted: (_) => _login(),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
@@ -135,8 +147,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   SizedBox(
                     height: 52,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : _login,
-                      child: _isLoading
+                      onPressed: isLoading ? null : _login,
+                      child: isLoading
                           ? const SizedBox(
                               width: 24,
                               height: 24,
@@ -159,7 +171,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       TextButton(
-                        onPressed: () => context.go('/auth/register'),
+                        onPressed: isLoading ? null : () => context.go('/auth/register'),
                         child: const Text('Sign Up'),
                       ),
                     ],

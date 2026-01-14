@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../shared/theme/app_theme.dart';
-import '../../../core/storage/secure_storage.dart';
+import '../../auth/providers/auth_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final authState = ref.watch(authProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
@@ -16,7 +18,7 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         children: [
           // Profile section
-          _ProfileSection(),
+          _ProfileSection(handle: authState.handle ?? 'user'),
           const Divider(),
 
           // Account settings
@@ -126,20 +128,19 @@ class SettingsScreen extends ConsumerWidget {
   void _showLogoutDialog(BuildContext context, WidgetRef ref) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Log Out'),
         content: const Text('Are you sure you want to log out?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () async {
-              final storage = ref.read(secureStorageProvider);
-              await storage.clearAll();
+              Navigator.pop(dialogContext);
+              await ref.read(authProvider.notifier).logout();
               if (context.mounted) {
-                Navigator.pop(context);
                 context.go('/auth/login');
               }
             },
@@ -156,20 +157,20 @@ class SettingsScreen extends ConsumerWidget {
   void _showDeleteAccountDialog(BuildContext context, WidgetRef ref) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Delete Account'),
         content: const Text(
           'This will permanently delete your account and all data. This action cannot be undone.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () {
-              // TODO: Delete account
-              Navigator.pop(context);
+              // TODO: Delete account via API
+              Navigator.pop(dialogContext);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.error,
@@ -183,6 +184,10 @@ class SettingsScreen extends ConsumerWidget {
 }
 
 class _ProfileSection extends StatelessWidget {
+  final String handle;
+
+  const _ProfileSection({required this.handle});
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -193,7 +198,7 @@ class _ProfileSection extends StatelessWidget {
             radius: 36,
             backgroundColor: AppColors.primary.withOpacity(0.1),
             child: Text(
-              'U',
+              handle.isNotEmpty ? handle[0].toUpperCase() : 'U',
               style: TextStyle(
                 color: AppColors.primary,
                 fontWeight: FontWeight.w600,
@@ -207,12 +212,12 @@ class _ProfileSection extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'User',
+                  handle,
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '@user',
+                  '@$handle',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ],
