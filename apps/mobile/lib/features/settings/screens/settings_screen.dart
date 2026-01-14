@@ -29,14 +29,14 @@ class SettingsScreen extends ConsumerWidget {
                 icon: Icons.key_outlined,
                 title: 'Privacy & Security',
                 onTap: () {
-                  // TODO: Privacy settings
+                  context.go('/settings/privacy');
                 },
               ),
               _SettingsTile(
                 icon: Icons.devices_outlined,
                 title: 'Linked Devices',
                 onTap: () {
-                  // TODO: Devices
+                  context.go('/settings/devices');
                 },
               ),
               _SettingsTile(
@@ -111,7 +111,7 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 12),
                 TextButton(
-                  onPressed: () => _showDeleteAccountDialog(context, ref),
+                  onPressed: () => context.go('/settings/privacy'),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.error,
                   ),
@@ -154,33 +154,6 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showDeleteAccountDialog(BuildContext context, WidgetRef ref) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Account'),
-        content: const Text(
-          'This will permanently delete your account and all data. This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              // TODO: Delete account via API
-              Navigator.pop(dialogContext);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-            ),
-            child: const Text('Delete Account'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _ProfileSection extends StatelessWidget {
@@ -196,7 +169,7 @@ class _ProfileSection extends StatelessWidget {
         children: [
           CircleAvatar(
             radius: 36,
-            backgroundColor: AppColors.primary.withOpacity(0.1),
+            backgroundColor: AppColors.primary.withValues(alpha: 0.1),
             child: Text(
               handle.isNotEmpty ? handle[0].toUpperCase() : 'U',
               style: TextStyle(

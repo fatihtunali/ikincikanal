@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/storage/secure_storage.dart';
 import '../../../core/crypto/identity_keys.dart';
+import '../../../core/device/device_info_service.dart';
 
 // Auth state
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
@@ -42,8 +43,9 @@ class AuthState {
 class AuthNotifier extends StateNotifier<AuthState> {
   final ApiClient _apiClient;
   final SecureStorageService _storage;
+  final DeviceInfoService _deviceInfo;
 
-  AuthNotifier(this._apiClient, this._storage) : super(const AuthState()) {
+  AuthNotifier(this._apiClient, this._storage, this._deviceInfo) : super(const AuthState()) {
     _checkAuthStatus();
   }
 
@@ -284,8 +286,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<String> _getDeviceName() async {
-    // TODO: Get actual device name using device_info_plus
-    return 'Flutter App';
+    return _deviceInfo.getDeviceName();
   }
 
   void clearError() {
@@ -297,7 +298,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final apiClient = ref.watch(apiClientProvider);
   final storage = ref.watch(secureStorageProvider);
-  return AuthNotifier(apiClient, storage);
+  final deviceInfo = ref.watch(deviceInfoProvider);
+  return AuthNotifier(apiClient, storage, deviceInfo);
 });
 
 // Convenience provider for checking auth status

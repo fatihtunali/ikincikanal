@@ -6,9 +6,10 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, createSign, createVerify, randomBytes } from 'crypto';
+import { createHash, createVerify, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { FederationKeyService } from './federation-key.service';
 import {
   ServerDiscoveryDto,
   FederationInboxDto,
@@ -25,6 +26,7 @@ export class FederationService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly config: ConfigService,
+    private readonly keyService: FederationKeyService,
   ) {
     this.homeServer = this.config.get('HOME_SERVER', 'ikincikanal.com');
     this.baseUrl = this.config.get(
@@ -282,29 +284,22 @@ export class FederationService {
     const timestamp = Date.now().toString();
     const nonce = randomBytes(32).toString('base64url');
 
-    // Get our signing key
-    const ourServer = await this.prisma.federationServer.findUnique({
-      where: { handle: `@${this.homeServer}` },
-      include: { keys: { where: { status: 'active' }, take: 1 } },
-    });
-
-    if (!ourServer || ourServer.keys.length === 0) {
-      throw new Error('No signing key available');
+    // Verify key service is ready
+    if (!this.keyService.isReady()) {
+      throw new Error('Federation key service not initialized');
     }
 
-    const signingKey = ourServer.keys[0];
-
-    // Create signature
+    // Create signature using secure key service
     const headers: FederationHeaders = {
-      'x-server-origin': ourServer.handle,
+      'x-server-origin': `@${this.homeServer}`,
       'x-timestamp': timestamp,
       'x-nonce': nonce,
-      'x-key-id': signingKey.keyId,
+      'x-key-id': this.keyService.getKeyId(),
       'x-signature': '', // Will be filled
     };
 
     const canonical = this.buildCanonicalString(headers, body);
-    const signature = this.signMessage(canonical, signingKey.publicKey); // Need private key
+    const signature = this.signMessage(canonical);
     headers['x-signature'] = signature;
 
     // Send request
@@ -333,12 +328,9 @@ export class FederationService {
     }
   }
 
-  private signMessage(message: string, privateKeyBase64: string): string {
-    // Note: In production, private key should be stored securely
-    // This is a placeholder - actual implementation needs private key management
-    const sign = createSign('Ed25519');
-    sign.update(message);
-    return sign.sign(Buffer.from(privateKeyBase64, 'base64')).toString('base64');
+  private signMessage(message: string): string {
+    // Use the secure FederationKeyService for signing
+    return this.keyService.sign(message);
   }
 
   // ==========================================================================

@@ -43,6 +43,7 @@ dependencies:
   intl: ^0.20.1
   uuid: ^4.5.1
   logger: ^2.5.0
+  device_info_plus: ^11.2.0
 
   # Image/Media
   cached_network_image: ^3.4.1
@@ -68,13 +69,5 @@ flutter:
     - assets/images/
     - assets/icons/
 
-  fonts:
-    - family: Inter
-      fonts:
-        - asset: assets/fonts/Inter-Regular.ttf
-        - asset: assets/fonts/Inter-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/Inter-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/Inter-Bold.ttf
-          weight: 700
+  # Using google_fonts package instead of bundled fonts
+  # This reduces app size and fonts are cached on first use

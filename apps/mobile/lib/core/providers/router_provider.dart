@@ -7,6 +7,8 @@ import '../../features/chat/screens/chat_list_screen.dart';
 import '../../features/chat/screens/chat_screen.dart';
 import '../../features/contacts/screens/contacts_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
+import '../../features/devices/screens/devices_screen.dart';
+import '../../features/settings/screens/privacy_settings_screen.dart';
 import '../storage/secure_storage.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -68,6 +70,16 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/settings',
             builder: (context, state) => const SettingsScreen(),
+            routes: [
+              GoRoute(
+                path: 'devices',
+                builder: (context, state) => const DevicesScreen(),
+              ),
+              GoRoute(
+                path: 'privacy',
+                builder: (context, state) => const PrivacySettingsScreen(),
+              ),
+            ],
           ),
         ],
       ),

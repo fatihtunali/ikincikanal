@@ -95,6 +95,39 @@ class ReactionEvent {
   }
 }
 
+/// Call signaling events received via WebSocket
+class CallEvent {
+  final String eventId;
+  final String callId;
+  final String fromUserId;
+  final String fromDeviceId;
+  final String eventType; // invite, answer, ice, hangup, reject, busy
+  final String encryptedPayload;
+  final DateTime receivedAt;
+
+  CallEvent({
+    required this.eventId,
+    required this.callId,
+    required this.fromUserId,
+    required this.fromDeviceId,
+    required this.eventType,
+    required this.encryptedPayload,
+    required this.receivedAt,
+  });
+
+  factory CallEvent.fromJson(Map<String, dynamic> json) {
+    return CallEvent(
+      eventId: json['eventId'],
+      callId: json['callId'],
+      fromUserId: json['fromUserId'],
+      fromDeviceId: json['fromDeviceId'],
+      eventType: json['eventType'],
+      encryptedPayload: json['encryptedPayload'],
+      receivedAt: DateTime.parse(json['receivedAt']),
+    );
+  }
+}
+
 class WebSocketService {
   static const String _baseUrl = 'https://api.itinerarytemplate.com';
 
@@ -105,12 +138,14 @@ class WebSocketService {
   final _typingController = StreamController<TypingEvent>.broadcast();
   final _readReceiptController = StreamController<ReadReceiptEvent>.broadcast();
   final _reactionController = StreamController<ReactionEvent>.broadcast();
+  final _callEventController = StreamController<CallEvent>.broadcast();
   final _connectionController = StreamController<bool>.broadcast();
 
   Stream<WebSocketMessage> get messages => _messageController.stream;
   Stream<TypingEvent> get typing => _typingController.stream;
   Stream<ReadReceiptEvent> get readReceipts => _readReceiptController.stream;
   Stream<ReactionEvent> get reactions => _reactionController.stream;
+  Stream<CallEvent> get callEvents => _callEventController.stream;
   Stream<bool> get connectionStatus => _connectionController.stream;
 
   bool get isConnected => _socket?.connected ?? false;
@@ -159,6 +194,31 @@ class WebSocketService {
       _reactionController.add(ReactionEvent.fromJson(data));
     });
 
+    // Call signaling events
+    _socket!.on('call_invite', (data) {
+      _callEventController.add(CallEvent.fromJson(data));
+    });
+
+    _socket!.on('call_answer', (data) {
+      _callEventController.add(CallEvent.fromJson(data));
+    });
+
+    _socket!.on('call_ice', (data) {
+      _callEventController.add(CallEvent.fromJson(data));
+    });
+
+    _socket!.on('call_hangup', (data) {
+      _callEventController.add(CallEvent.fromJson(data));
+    });
+
+    _socket!.on('call_reject', (data) {
+      _callEventController.add(CallEvent.fromJson(data));
+    });
+
+    _socket!.on('call_busy', (data) {
+      _callEventController.add(CallEvent.fromJson(data));
+    });
+
     _socket!.connect();
   }
 
@@ -195,6 +255,7 @@ class WebSocketService {
     _typingController.close();
     _readReceiptController.close();
     _reactionController.close();
+    _callEventController.close();
     _connectionController.close();
   }
 }

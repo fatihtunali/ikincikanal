@@ -123,7 +123,7 @@ class _ContactTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: AppColors.primary.withOpacity(0.1),
+        backgroundColor: AppColors.primary.withValues(alpha: 0.1),
         child: Text(
           contact.name[0].toUpperCase(),
           style: TextStyle(

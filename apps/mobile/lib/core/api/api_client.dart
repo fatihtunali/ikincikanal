@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../storage/secure_storage.dart';
 
+/// @deprecated Use services from api_providers.dart instead
+/// This class is kept for backwards compatibility during migration
 class ApiClient {
   final Dio _dio;
   final SecureStorageService _storage;
@@ -170,25 +172,26 @@ class ApiClient {
   // ==========================================================================
 
   Future<Map<String, dynamic>> resolveUser(String handle) async {
-    final response = await _dio.get('/users/resolve', queryParameters: {
+    final response = await _dio.post('/users/resolve', data: {
       'handle': handle,
     });
     return response.data;
   }
 
   Future<Map<String, dynamic>> getProfile() async {
-    final response = await _dio.get('/users/me');
+    final response = await _dio.get('/me');
     return response.data;
   }
 
   Future<void> updateProfile({String? displayName}) async {
-    await _dio.patch('/users/me', data: {
+    await _dio.put('/me', data: {
       if (displayName != null) 'displayName': displayName,
     });
   }
 }
 
-final dioProvider = Provider<Dio>((ref) {
+/// @deprecated Use dioProvider from api_providers.dart instead
+final legacyDioProvider = Provider<Dio>((ref) {
   return Dio(BaseOptions(
     baseUrl: 'https://api.itinerarytemplate.com',
     connectTimeout: const Duration(seconds: 30),
@@ -199,8 +202,9 @@ final dioProvider = Provider<Dio>((ref) {
   ));
 });
 
+/// @deprecated Use service providers from api_providers.dart instead
 final apiClientProvider = Provider<ApiClient>((ref) {
-  final dio = ref.watch(dioProvider);
+  final dio = ref.watch(legacyDioProvider);
   final storage = ref.watch(secureStorageProvider);
   return ApiClient(dio, storage);
 });
