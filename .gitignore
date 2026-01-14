@@ -53,3 +53,4 @@ tmpclaude-21cf-cwd
 
 # Claude notes (contains secrets)
 .claude/
+tmpclaude-*
