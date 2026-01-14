@@ -35,7 +35,7 @@ dependencies:
   x25519: ^0.1.1
 
   # Authentication
-  # passkeys: ^2.17.4  # TODO: Re-enable when passkey integration is ready
+  passkeys: ^2.17.4
 
   # Utils
   freezed_annotation: ^2.4.4
